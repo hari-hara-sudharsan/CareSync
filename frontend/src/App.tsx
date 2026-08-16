@@ -1,7 +1,7 @@
-import { DesignSystemPage } from '@/features/admin/DesignSystemPage';
+import { AppRouter } from '@/app/router/AppRouter';
 
 function App() {
-  return <DesignSystemPage />;
+  return <AppRouter />;
 }
 
 export default App;
