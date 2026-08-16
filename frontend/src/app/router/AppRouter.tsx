@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ParentWelcomePage } from '@/features/parent/ParentWelcomePage';
-import { ParentLoginPagePlaceholder } from '@/features/parent/ParentLoginPagePlaceholder';
+import { ParentLoginPage } from '@/features/parent/auth/ParentLoginPage';
+import { ParentOnboardingPlaceholder } from '@/features/parent/ParentOnboardingPlaceholder';
 import { DesignSystemPage } from '@/features/admin/DesignSystemPage';
 
 export const AppRouter: React.FC = () => {
@@ -10,6 +11,7 @@ export const AppRouter: React.FC = () => {
     const pathname = window.location.pathname;
     if (pathname === '/design-system') return '/design-system';
     if (pathname === '/parent/login') return '/parent/login';
+    if (pathname === '/parent/onboarding') return '/parent/onboarding';
     return '/parent/welcome';
   };
 
@@ -39,7 +41,11 @@ export const AppRouter: React.FC = () => {
   }
 
   if (currentPath === '/parent/login') {
-    return <ParentLoginPagePlaceholder onNavigate={navigate} />;
+    return <ParentLoginPage onNavigate={navigate} />;
+  }
+
+  if (currentPath === '/parent/onboarding') {
+    return <ParentOnboardingPlaceholder onNavigate={navigate} />;
   }
 
   return <ParentWelcomePage onNavigate={navigate} />;
