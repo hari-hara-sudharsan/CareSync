@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-cream: #FAF7F1;
+    --surface-white: #FFFFFF;
+    --surface-soft-green: #E8F4EF;
+    --primary-green: #16866B;
+    --primary-green-hover: #126E58;
+    --text-primary: #1D2926;
+    --text-secondary: #66736F;
+    --text-muted: #8E9B97;
+    --border-light: #E5E7E5;
+    
+    --warning-main: #D97706;
+    --warning-soft: #FEF3C7;
+    --critical-main: #DC2626;
+    --critical-soft: #FEE2E2;
+    --success-main: #16866B;
+    --success-soft: #E8F4EF;
+    --info-main: #0284C7;
+    --info-soft: #E0F2FE;
+  }
+}
+
+/* Custom Utilities for CareSync Premium Calm Care */
+.bg-care-cream {
+  background-color: #FAF7F1;
+}
+
+.bg-care-green {
+  background-color: #16866B;
+}
+
+.bg-care-green-soft {
+  background-color: #E8F4EF;
+}
+
+.text-care-green {
+  color: #16866B;
+}
+
+.text-care-primary {
+  color: #1D2926;
+}
+
+.text-care-secondary {
+  color: #66736F;
+}
+
+.border-care-light {
+  border-color: #E5E7E5;
+}
+
+.shadow-care-sm {
+  box-shadow: 0 2px 8px rgba(22, 134, 107, 0.05);
+}
+
+.shadow-care-md {
+  box-shadow: 0 4px 16px -2px rgba(29, 41, 38, 0.06), 0 2px 6px -1px rgba(22, 134, 107, 0.04);
+}
+
+.shadow-care-lg {
+  box-shadow: 0 10px 30px -4px rgba(29, 41, 38, 0.08), 0 4px 12px -2px rgba(22, 134, 107, 0.06);
+}
+
+/* Accessible focus ring */
+.focus-care {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(22, 134, 107, 0.35);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FAF7F1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
