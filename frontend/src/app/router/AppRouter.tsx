@@ -4,6 +4,7 @@ import { ParentLoginPage } from '@/features/parent/auth/ParentLoginPage';
 import { ParentOnboardingPage } from '@/features/parent/onboarding/ParentOnboardingPage';
 import { ParentHomePage } from '@/features/parent/home/ParentHomePage';
 import { ParentCheckInPage } from '@/features/parent/checkin/ParentCheckInPage';
+import { ParentMedicationPage } from '@/features/parent/medication/ParentMedicationPage';
 import { DesignSystemPage } from '@/features/admin/DesignSystemPage';
 
 export const AppRouter: React.FC = () => {
@@ -16,6 +17,7 @@ export const AppRouter: React.FC = () => {
     if (pathname === '/parent/onboarding') return '/parent/onboarding';
     if (pathname === '/parent/home') return '/parent/home';
     if (pathname === '/parent/check-in') return '/parent/check-in';
+    if (pathname === '/parent/medication') return '/parent/medication';
     return '/parent/welcome';
   };
 
@@ -58,6 +60,10 @@ export const AppRouter: React.FC = () => {
 
   if (currentPath === '/parent/check-in') {
     return <ParentCheckInPage onNavigate={navigate} />;
+  }
+
+  if (currentPath === '/parent/medication') {
+    return <ParentMedicationPage onNavigate={navigate} />;
   }
 
   return <ParentWelcomePage onNavigate={navigate} />;
