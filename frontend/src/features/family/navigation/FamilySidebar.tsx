@@ -56,7 +56,7 @@ export const FamilySidebar: React.FC<FamilySidebarProps> = ({
     {
       title: 'CARE MANAGEMENT',
       items: [
-        { label: 'Care Requests', route: '/family/requests', icon: <FileText className="w-5 h-5" />, isSupported: false },
+        { label: 'Care Requests', route: '/family/requests', icon: <FileText className="w-5 h-5" />, isSupported: true },
         { label: 'Appointments', route: '/family/appointments', icon: <Calendar className="w-5 h-5" />, isSupported: false },
         { label: 'Medications', route: '/family/medications', icon: <Pill className="w-5 h-5" />, isSupported: false },
         { label: 'Safety Check-Ins', route: '/family/check-ins', icon: <ShieldCheck className="w-5 h-5" />, isSupported: false },
