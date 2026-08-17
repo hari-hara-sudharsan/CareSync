@@ -3,6 +3,7 @@ import { ParentWelcomePage } from '@/features/parent/ParentWelcomePage';
 import { ParentLoginPage } from '@/features/parent/auth/ParentLoginPage';
 import { ParentOnboardingPage } from '@/features/parent/onboarding/ParentOnboardingPage';
 import { ParentHomePage } from '@/features/parent/home/ParentHomePage';
+import { ParentCheckInPage } from '@/features/parent/checkin/ParentCheckInPage';
 import { DesignSystemPage } from '@/features/admin/DesignSystemPage';
 
 export const AppRouter: React.FC = () => {
@@ -14,6 +15,7 @@ export const AppRouter: React.FC = () => {
     if (pathname === '/parent/login') return '/parent/login';
     if (pathname === '/parent/onboarding') return '/parent/onboarding';
     if (pathname === '/parent/home') return '/parent/home';
+    if (pathname === '/parent/check-in') return '/parent/check-in';
     return '/parent/welcome';
   };
 
@@ -52,6 +54,10 @@ export const AppRouter: React.FC = () => {
 
   if (currentPath === '/parent/home') {
     return <ParentHomePage onNavigate={navigate} />;
+  }
+
+  if (currentPath === '/parent/check-in') {
+    return <ParentCheckInPage onNavigate={navigate} />;
   }
 
   return <ParentWelcomePage onNavigate={navigate} />;
