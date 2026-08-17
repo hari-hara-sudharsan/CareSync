@@ -7,6 +7,7 @@ import { ParentCheckInPage } from '@/features/parent/checkin/ParentCheckInPage';
 import { ParentMedicationPage } from '@/features/parent/medication/ParentMedicationPage';
 import { ParentAppointmentPage } from '@/features/parent/appointment/ParentAppointmentPage';
 import { ParentCareTeamPage } from '@/features/parent/care-team/ParentCareTeamPage';
+import { ParentCareLogPage } from '@/features/parent/care-log/ParentCareLogPage';
 import { DesignSystemPage } from '@/features/admin/DesignSystemPage';
 
 export const AppRouter: React.FC = () => {
@@ -22,6 +23,7 @@ export const AppRouter: React.FC = () => {
     if (pathname === '/parent/medication') return '/parent/medication';
     if (pathname === '/parent/appointment') return '/parent/appointment';
     if (pathname === '/parent/care-team') return '/parent/care-team';
+    if (pathname === '/parent/care-log') return '/parent/care-log';
     return '/parent/welcome';
   };
 
@@ -76,6 +78,10 @@ export const AppRouter: React.FC = () => {
 
   if (currentPath === '/parent/care-team') {
     return <ParentCareTeamPage onNavigate={navigate} />;
+  }
+
+  if (currentPath === '/parent/care-log') {
+    return <ParentCareLogPage onNavigate={navigate} />;
   }
 
   return <ParentWelcomePage onNavigate={navigate} />;
