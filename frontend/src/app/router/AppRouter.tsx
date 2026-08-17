@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ParentWelcomePage } from '@/features/parent/ParentWelcomePage';
 import { ParentLoginPage } from '@/features/parent/auth/ParentLoginPage';
 import { ParentOnboardingPage } from '@/features/parent/onboarding/ParentOnboardingPage';
-import { ParentHomePlaceholder } from '@/features/parent/ParentHomePlaceholder';
+import { ParentHomePage } from '@/features/parent/home/ParentHomePage';
 import { DesignSystemPage } from '@/features/admin/DesignSystemPage';
 
 export const AppRouter: React.FC = () => {
@@ -51,7 +51,7 @@ export const AppRouter: React.FC = () => {
   }
 
   if (currentPath === '/parent/home') {
-    return <ParentHomePlaceholder onNavigate={navigate} />;
+    return <ParentHomePage onNavigate={navigate} />;
   }
 
   return <ParentWelcomePage onNavigate={navigate} />;
