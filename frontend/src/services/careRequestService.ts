@@ -134,6 +134,31 @@ class CareSyncCareRequestService implements CareRequestServiceContract {
   }
 
   async getAssignmentCandidates(requestId: string): Promise<AssignmentCandidate[]> {
+    console.info(`[CareRequestService] Fetching matching candidate recommendations for ${requestId}`);
+    try {
+      const res = await fetch(`${this.baseUrl}/care-requests/${requestId}/match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.candidates && Array.isArray(data.candidates)) {
+          return data.candidates.map((c: Record<string, unknown>) => ({
+            id: String(c.candidate_id),
+            name: String(c.name),
+            relationship: String(c.relationship || 'Caregiver'),
+            type: c.candidate_type as AssignmentCandidate['type'],
+            isAvailable: true,
+            phone: c.phone ? String(c.phone) : undefined,
+            matchScore: Math.round(Number(c.score || 0.9) * 100),
+            reasons: Array.isArray(c.reasons) ? c.reasons.map(String) : undefined,
+          }));
+        }
+      }
+    } catch {
+      console.warn('[CareRequestService] Backend offline during candidate matching. Using fallback.');
+    }
+
     const req = await this.getCareRequest(requestId);
     return req.candidates || [];
   }

@@ -11,6 +11,7 @@ from app.models.care_network import CareMember
 from app.schemas.care_request import CareRequestCreate, CareRequestRead, CareRequestAssign
 from app.services.care_request_service import CareRequestService
 from app.services.care_request_state_machine import CareRequestStatus
+from app.services.matching_engine.matching_service import MatchingEngineService
 
 router = APIRouter()
 
@@ -21,7 +22,6 @@ async def get_care_requests(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Enforce Parent Isolation Check
     await CareRequestService.verify_parent_access(db, current_user.id, parent_id)
 
     query = select(CareRequest).where(CareRequest.parent_id == parent_id)
@@ -39,7 +39,6 @@ async def create_care_request(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Enforce Parent Isolation Check
     await CareRequestService.verify_parent_access(db, current_user.id, req.parent_id)
 
     created_req = await CareRequestService.create_care_request(
@@ -58,6 +57,70 @@ async def create_care_request(
     )
     return created_req
 
+@router.post("/{request_id}/match", summary="Get Candidate Recommendations (Matching Engine)")
+async def get_matching_recommendations(
+    request_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+    req = res.scalars().first()
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest {request_id} not found.")
+
+    await CareRequestService.verify_parent_access(db, current_user.id, req.parent_id)
+
+    # Candidate Pool for Matching Engine Evaluation
+    candidate_pool = [
+        {
+            "id": "c-1",
+            "name": "David Woodson",
+            "relationship": "Son",
+            "type": "FAMILY",
+            "is_active": True,
+            "is_available": True,
+            "is_primary_contact": True,
+            "parent_id": req.parent_id,
+            "distance_km": 2.5,
+            "reliability_score": 4.9,
+            "permissions": ["TRANSPORTATION", "ERRANDS", "MEDICATION", "CHECK_INS"],
+            "has_transport_capability": True,
+            "phone": "+1 (555) 234-5678",
+        },
+        {
+            "id": "c-2",
+            "name": "Sarah Woodson",
+            "relationship": "Daughter",
+            "type": "FAMILY",
+            "is_active": True,
+            "is_available": True,
+            "is_primary_contact": False,
+            "parent_id": req.parent_id,
+            "distance_km": 5.0,
+            "reliability_score": 4.8,
+            "permissions": ["TRANSPORTATION", "ERRANDS", "CHECK_INS"],
+            "has_transport_capability": True,
+            "phone": "+1 (555) 876-5432",
+        },
+        {
+            "id": "c-3",
+            "name": "Priya Sharma",
+            "relationship": "Verified Volunteer",
+            "type": "VOLUNTEER",
+            "is_active": True,
+            "is_verified": True,
+            "is_available": True,
+            "distance_km": 1.4,
+            "reliability_score": 4.9,
+            "permissions": ["TRANSPORTATION", "ERRANDS"],
+            "has_transport_capability": True,
+            "phone": "+1 (555) 345-6789",
+        },
+    ]
+
+    recommendation = MatchingEngineService.match_candidates(req, candidate_pool)
+    return recommendation
+
 @router.post("/{request_id}/assign", summary="Assign Care Request to Candidate (Atomic Transaction)")
 async def assign_care_request(
     request_id: str,
@@ -66,7 +129,6 @@ async def assign_care_request(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Fetch candidate details
     result = await db.execute(select(User).where(User.id == payload.assignee_id))
     assignee = result.scalars().first()
     assignee_name = assignee.full_name if assignee else "Assigned Helper"
