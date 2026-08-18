@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
 from app.core.database import get_db
+from app.core.rate_limiter import rate_limiter
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.trust.models import VerificationRecord, Complaint
@@ -60,6 +61,9 @@ async def file_complaint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Rate Limiting & Abuse Protection: Max 3 complaints per minute per user
+    rate_limiter.check_rate_limit("complaint_file", current_user.id, max_requests=3, window_seconds=60)
+
     await CareRequestService.verify_parent_access(db, current_user.id, payload.parent_id)
 
     result = await ComplaintService.file_complaint(

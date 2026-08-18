@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import engine, Base
+from app.core.observability import StructuredTracingMiddleware
 from app.api.v1.api import api_router
 
 @asynccontextmanager
@@ -21,6 +22,9 @@ app = FastAPI(
     redoc_url=f"{settings.API_V1_STR}/redoc",
     lifespan=lifespan,
 )
+
+# Add Structured Tracing Middleware
+app.add_middleware(StructuredTracingMiddleware)
 
 # Set CORS middleware
 if settings.CORS_ORIGINS:
