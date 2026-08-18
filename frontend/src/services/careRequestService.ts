@@ -4,12 +4,13 @@ import type {
   AssignmentCandidate,
   CareRequestServiceContract,
 } from '@/types/care-request';
+import { authService } from './authService';
 
 /**
  * CareSync Care Request & Assignment Service
  * 
  * Communicates directly with FastAPI backend (/api/v1/care-requests)
- * with graceful fallback to local mock data if the API server is offline.
+ * using Bearer authorization headers with fallback to local domain contracts.
  */
 class CareSyncCareRequestService implements CareRequestServiceContract {
   public baseUrl = 'http://localhost:8000/api/v1';
@@ -19,13 +20,13 @@ class CareSyncCareRequestService implements CareRequestServiceContract {
     parentId?: string,
     filters?: CareRequestFilters
   ): Promise<CareRequest[]> {
-    console.info(`[CareRequestService] Fetching care requests for caregiver ${caregiverId}, parentId=${parentId}`);
+    const pid = parentId || authService.getActiveParentId();
+    console.info(`[CareRequestService] Fetching care requests for caregiver ${caregiverId}, parentId=${pid}`);
 
     try {
-      const pid = parentId || 'p-1';
       const url = `${this.baseUrl}/care-requests?parent_id=${pid}${filters?.status ? `&status_filter=${filters.status}` : ''}`;
       const res = await fetch(url, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: authService.getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -37,7 +38,7 @@ class CareSyncCareRequestService implements CareRequestServiceContract {
       console.warn('[CareRequestService] Backend server offline or unreachable. Falling back to local domain contracts.');
     }
 
-    return this.getFallbackRequests(parentId, filters);
+    return this.getFallbackRequests(pid, filters);
   }
 
   private mapBackendRequest(raw: Record<string, unknown>): CareRequest {
@@ -138,7 +139,7 @@ class CareSyncCareRequestService implements CareRequestServiceContract {
     try {
       const res = await fetch(`${this.baseUrl}/care-requests/${requestId}/match`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authService.getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -173,7 +174,7 @@ class CareSyncCareRequestService implements CareRequestServiceContract {
       const res = await fetch(`${this.baseUrl}/care-requests/${requestId}/assign`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          ...authService.getAuthHeaders(),
           'Idempotency-Key': `assign-${requestId}-${Date.now()}`,
         },
         body: JSON.stringify({ assignee_id: assigneeId }),
