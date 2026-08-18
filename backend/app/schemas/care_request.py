@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 class CandidateRead(BaseModel):
     id: str
@@ -21,6 +21,9 @@ class CareRequestCreate(BaseModel):
 
 class CareRequestAssign(BaseModel):
     assignee_id: str
+    assignee_name: Optional[str] = None
+    assignee_role: Optional[str] = None
+    candidate_dto: Optional[Dict[str, Any]] = None
 
 class CareRequestRead(BaseModel):
     id: str

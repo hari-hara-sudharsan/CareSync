@@ -88,7 +88,17 @@ class DecisionService:
                 detail=f"Invalid Operation: DecisionCard '{card_id}' is already '{card.status}' and cannot be resolved."
             )
 
-        # Step 5: Execute Resolution
+        # Step 5: CareRequest Domain State Validation for linked decision cards
+        if card.related_entity_id:
+            res_req = await db.execute(select(CareRequest).where(CareRequest.id == card.related_entity_id))
+            linked_req = res_req.scalars().first()
+            if linked_req and linked_req.status in ["COMPLETED", "CLOSED", "PARENT_CONFIRMED"]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid Operation: Linked CareRequest '{card.related_entity_id}' is already '{linked_req.status}'."
+                )
+
+        # Step 6: Execute Resolution
         card.status = "RESOLVED"
         now_str = datetime.now(timezone.utc).isoformat()
 

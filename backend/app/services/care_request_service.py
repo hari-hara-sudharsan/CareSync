@@ -8,6 +8,7 @@ from app.models.care_network import CareMember
 from app.models.decision import AuditEvent
 from app.models.idempotency import IdempotencyRecord
 from app.services.care_request_state_machine import CareRequestStateMachine, CareRequestStatus
+from app.services.matching_engine.filters import HardConstraintFilter
 
 class CareRequestService:
     """
@@ -35,7 +36,7 @@ class CareRequestService:
     @staticmethod
     async def check_idempotency(
         db: AsyncSession, idempotency_key: Optional[str], user_id: str, request_path: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Any]:
         if not idempotency_key:
             return None
 
@@ -121,37 +122,57 @@ class CareRequestService:
         assignee_role: str,
         actor_id: str,
         actor_name: str,
+        candidate_dto: Optional[Dict[str, Any]] = None,
         idempotency_key: Optional[str] = None,
     ) -> CareRequest:
-        cached = await CareRequestService.check_idempotency(db, idempotency_key, actor_id, f"assign_{request_id}")
-        if cached:
-            return cached
+        # Step 1: Idempotency Check
+        if idempotency_key:
+            res_idemp = await db.execute(
+                select(IdempotencyRecord).where(
+                    IdempotencyRecord.idempotency_key == idempotency_key,
+                    IdempotencyRecord.user_id == actor_id,
+                )
+            )
+            existing_rec = res_idemp.scalars().first()
+            if existing_rec:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
 
-        # Fetch CareRequest
+        # Step 2: Fetch CareRequest with Row Locking (SELECT FOR UPDATE)
         result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
         req = result.scalars().first()
         if not req:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest {request_id} not found.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-        # Check for concurrency / duplicate active assignment
+        # Step 3: Check for Same Assignee (Idempotent call)
         if req.status == CareRequestStatus.ASSIGNED.value and req.assigned_to_id == assignee_id:
             return req
-        if req.status in [CareRequestStatus.ASSIGNED.value, CareRequestStatus.ACCEPTED.value, CareRequestStatus.IN_PROGRESS.value] and req.assigned_to_id != assignee_id:
+
+        # Step 4: Check for Concurrency Conflict (Already assigned to someone else)
+        if req.status == CareRequestStatus.ASSIGNED.value and req.assigned_to_id != assignee_id:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Conflict: CareRequest is already assigned to another caregiver."
+                detail=f"Conflict: CareRequest '{request_id}' is already assigned to another caregiver."
             )
 
-        # Validate State Transition
+        # Step 5: Validate State Machine Transition (Rejects CLOSED/COMPLETED/IN_PROGRESS)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ASSIGNED.value)
 
-        # Update Request Status & Assignee
+        # Step 6: Candidate Revalidation at Assignment Time
+        if candidate_dto:
+            if not HardConstraintFilter.is_eligible(candidate_dto, req, req.parent_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Ineligible Candidate: Candidate '{assignee_name}' fails current safety, verification, or permission constraints."
+                )
+
+        # Step 7: Atomic Assignment State Mutation
         req.status = CareRequestStatus.ASSIGNED.value
         req.assigned_to_id = assignee_id
         req.assigned_to_name = assignee_name
         req.assigned_to_role = assignee_role
 
-        # Record Assignment History Entry
+        # Step 8: Record Assignment History Entry
         history_entry = AssignmentHistory(
             care_request_id=req.id,
             assignee_id=assignee_id,
@@ -161,16 +182,33 @@ class CareRequestService:
         )
         db.add(history_entry)
 
-        # Record Audit Event
+        # Step 9: Immutable Audit Log Event
         audit = AuditEvent(
             actor_id=actor_id,
             actor_name=actor_name,
             action="CARE_REQUEST_ASSIGNED",
             resource_type="CareRequest",
             resource_id=req.id,
-            details={"assigned_to_id": assignee_id, "assigned_to_name": assignee_name},
+            details={
+                "assigned_to_id": assignee_id,
+                "assigned_to_name": assignee_name,
+                "assigned_to_role": assignee_role,
+                "source": "HUMAN_SELECTED_CANDIDATE",
+            },
         )
         db.add(audit)
+
+        if idempotency_key:
+            response_payload = {
+                "id": req.id,
+                "status": req.status,
+                "assigned_to_id": req.assigned_to_id,
+                "assigned_to_name": req.assigned_to_name,
+                "assigned_to_role": req.assigned_to_role,
+            }
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, actor_id, f"assign_{request_id}", 200, response_payload
+            )
 
         await db.commit()
         await db.refresh(req)
