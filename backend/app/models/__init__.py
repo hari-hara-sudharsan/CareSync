@@ -7,6 +7,7 @@ from app.models.medication import Medication, MedicationEvent
 from app.models.appointment import Appointment, TransportationRequest
 from app.models.checkin import CheckInEvent
 from app.models.decision import DecisionCard, AuditEvent
+from app.models.idempotency import IdempotencyRecord
 
 __all__ = [
     "BaseModel",
@@ -22,4 +23,5 @@ __all__ = [
     "CheckInEvent",
     "DecisionCard",
     "AuditEvent",
+    "IdempotencyRecord",
 ]
