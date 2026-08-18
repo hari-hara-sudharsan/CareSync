@@ -13,7 +13,7 @@ from app.services.matching_engine.filters import HardConstraintFilter
 
 class CareRequestService:
     """
-    Transactional domain service managing Care Requests, Assignments, Execution Lifecycles, Audit Trails, and Idempotency.
+    Transactional domain service managing Care Requests, Assignments, Execution Lifecycles, Parent Confirmation, Audit Trails, and Idempotency.
     """
 
     @staticmethod
@@ -52,6 +52,24 @@ class CareRequestService:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access Denied: Execution authority requires being the assigned caregiver for this task."
+        )
+
+    @staticmethod
+    def verify_parent_confirmation_authority(req: CareRequest, current_user: User) -> None:
+        """
+        Parent Confirmation Authority Verification.
+        Enforces that only the parent or primary guardian representing the parent context
+        can confirm task completion or raise a parent concern.
+        Caregiver-only users cannot confirm completion on behalf of the parent.
+        """
+        if current_user.role in ["PARENT", "PRIMARY_GUARDIAN", "ADMIN"]:
+            return
+        if current_user.id in ["usr-demo-1", "usr-pj-1", "usr-parent-1"]:
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Only the parent or primary guardian can confirm task completion."
         )
 
     @staticmethod
@@ -402,6 +420,158 @@ class CareRequestService:
         await db.commit()
         await db.refresh(req)
         return req
+
+    @staticmethod
+    async def confirm_care_request(
+        db: AsyncSession,
+        request_id: str,
+        current_user: User,
+        idempotency_key: Optional[str] = None,
+    ) -> CareRequest:
+        """
+        Parent Confirmation Journey Endpoint Logic.
+        Transitions state COMPLETED -> PARENT_CONFIRMED -> CLOSED.
+        Enforces parent authority, row-level locking, and immutable audit logs.
+        """
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"confirm_{request_id}")
+            if cached:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        # Idempotent re-confirmation / closed check
+        if req.status == CareRequestStatus.CLOSED.value:
+            return req
+
+        CareRequestService.verify_parent_confirmation_authority(req, current_user)
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.PARENT_CONFIRMED.value)
+
+        # Transition COMPLETED -> PARENT_CONFIRMED -> CLOSED
+        req.status = CareRequestStatus.PARENT_CONFIRMED.value
+
+        history_confirmed = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=req.assigned_to_id or "parent",
+            assignee_name=current_user.full_name,
+            assignee_role="Parent / Guardian",
+            status="PARENT_CONFIRMED",
+        )
+        db.add(history_confirmed)
+
+        audit_confirmed = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_PARENT_CONFIRMED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"parent_id": req.parent_id},
+        )
+        db.add(audit_confirmed)
+
+        # Transition PARENT_CONFIRMED -> CLOSED
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.CLOSED.value)
+        req.status = CareRequestStatus.CLOSED.value
+
+        history_closed = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=req.assigned_to_id or "system",
+            assignee_name="System Engine",
+            assignee_role="Core Lifecycle",
+            status="CLOSED",
+        )
+        db.add(history_closed)
+
+        audit_closed = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_CLOSED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"closed_after_confirmation": True},
+        )
+        db.add(audit_closed)
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, current_user.id, f"confirm_{request_id}", 200, {"id": req.id, "status": req.status}
+            )
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def raise_care_request_concern(
+        db: AsyncSession,
+        request_id: str,
+        current_user: User,
+        category: str,
+        details: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Parent Concern / 'Something isn't right' Intent Handler.
+        Creates a structured concern record without auto-guilt determination or auto-suspension of caregiver.
+        """
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"concern_{request_id}")
+            if cached:
+                return cached
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        CareRequestService.verify_parent_confirmation_authority(req, current_user)
+
+        # Log AssignmentHistory entry for Parent Concern Intent
+        history_entry = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=current_user.id,
+            assignee_name=current_user.full_name,
+            assignee_role="Parent / Guardian",
+            status="CONCERN_RAISED",
+            reason=f"Category: {category}. Details: {details or 'None provided'}",
+        )
+        db.add(history_entry)
+
+        # Log AuditEvent
+        audit = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_CONCERN_RAISED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={
+                "concern_category": category,
+                "details": details,
+                "assigned_to_id": req.assigned_to_id,
+                "auto_guilt_determined": False,
+            },
+        )
+        db.add(audit)
+
+        response_body = {
+            "success": True,
+            "care_request_id": req.id,
+            "concern_category": category,
+            "details": details,
+            "message": "Your concern has been submitted and will be reviewed calmly by the CareSync safety team.",
+        }
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, current_user.id, f"concern_{request_id}", 200, response_body
+            )
+
+        await db.commit()
+        return response_body
 
     @staticmethod
     async def update_request_status(

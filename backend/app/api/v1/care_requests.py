@@ -23,6 +23,10 @@ class MatchingPayload(BaseModel):
 class CompletionPayload(BaseModel):
     completion_note: Optional[str] = None
 
+class ConcernPayload(BaseModel):
+    category: str = "OTHER"
+    details: Optional[str] = None
+
 def map_category_to_permission(category: str) -> CarePermission:
     cat_upper = category.upper() if category else ""
     if "TRANSPORT" in cat_upper:
@@ -315,6 +319,55 @@ async def complete_care_request(
         idempotency_key=idempotency_key,
     )
     return completed_req
+
+@router.post("/{request_id}/confirm", summary="Parent Confirm Care Request Completion")
+async def confirm_care_request(
+    request_id: str,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+    req = res_req.scalars().first()
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+    required_perm = map_category_to_permission(req.category)
+    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+
+    confirmed_req = await CareRequestService.confirm_care_request(
+        db=db,
+        request_id=request_id,
+        current_user=current_user,
+        idempotency_key=idempotency_key,
+    )
+    return confirmed_req
+
+@router.post("/{request_id}/raise-concern", summary="Parent Raise Concern on Completed Task")
+async def raise_care_request_concern(
+    request_id: str,
+    payload: ConcernPayload,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+    req = res_req.scalars().first()
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+    required_perm = map_category_to_permission(req.category)
+    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+
+    res = await CareRequestService.raise_care_request_concern(
+        db=db,
+        request_id=request_id,
+        current_user=current_user,
+        category=payload.category,
+        details=payload.details,
+        idempotency_key=idempotency_key,
+    )
+    return res
 
 @router.post("/{request_id}/transition/{target_status}", summary="Transition Care Request State")
 async def transition_care_request_status(
