@@ -7,17 +7,40 @@ import type {
 } from '@/types/appointment';
 
 /**
- * CareSync Appointment & Transportation Service Contract
+ * CareSync Appointment & Transportation Service
  * 
- * Clean domain boundary separating Appointment definitions from Transportation requests.
- * An appointment does NOT automatically create a transportation request.
- * Interface ready for FastAPI endpoints (/api/v1/parents/appointments).
+ * Interacts with FastAPI backend (/api/v1/appointments).
+ * Maintains domain boundary: selecting NEED_HELP creates a TransportationRequest + CareRequest.
  */
 class CareSyncAppointmentService implements AppointmentServiceContract {
-  public apiEndpoint = '/api/v1/parents/appointments';
+  public baseUrl = 'http://localhost:8000/api/v1';
 
   async getUpcomingAppointments(parentId: string): Promise<Appointment[]> {
-    console.info(`[AppointmentService Contract] Fetching upcoming appointments for ${parentId}`);
+    console.info(`[AppointmentService] Fetching upcoming appointments for ${parentId}`);
+
+    try {
+      const res = await fetch(`${this.baseUrl}/appointments?parent_id=${parentId}`);
+      if (res.ok) {
+        const data = await res.json();
+        return data.map((item: Record<string, unknown>) => ({
+          id: String(item.id),
+          parentId: String(item.parent_id),
+          title: String(item.title),
+          providerName: String(item.provider_name),
+          specialty: String(item.specialty || ''),
+          locationName: String(item.location_name),
+          address: String(item.address),
+          startsAt: String(item.starts_at),
+          endsAt: item.ends_at ? String(item.ends_at) : undefined,
+          status: String(item.status || 'UPCOMING') as Appointment['status'],
+          notes: item.notes ? String(item.notes) : undefined,
+          transportationChoice: (item.transportation_choice || 'NOT_DECIDED') as Appointment['transportationChoice'],
+          transportationStatus: (item.transportation_status || 'NOT_DECIDED') as Appointment['transportationStatus'],
+        }));
+      }
+    } catch {
+      console.warn('[AppointmentService] Backend server offline. Using fallback appointments.');
+    }
 
     return [
       {
@@ -28,8 +51,8 @@ class CareSyncAppointmentService implements AppointmentServiceContract {
         specialty: 'Cardiology',
         locationName: 'St. Jude Medical Center, Suite 402',
         address: '1400 Community Drive, Medical District',
-        startsAt: '2026-08-18T10:30:00Z',
-        endsAt: '2026-08-18T11:30:00Z',
+        startsAt: 'Tomorrow at 10:30 AM',
+        endsAt: 'Tomorrow at 11:30 AM',
         status: 'CONFIRMED',
         notes: 'Fast for 8 hours prior to lab work. Bring recent blood pressure log.',
         transportationChoice: 'NOT_DECIDED',
@@ -43,8 +66,8 @@ class CareSyncAppointmentService implements AppointmentServiceContract {
         specialty: 'Ophthalmology',
         locationName: 'Vision Care Center',
         address: '820 Oak Street, Suite 105',
-        startsAt: '2026-08-22T14:00:00Z',
-        endsAt: '2026-08-22T15:00:00Z',
+        startsAt: 'Aug 22 at 02:00 PM',
+        endsAt: 'Aug 22 at 03:00 PM',
         status: 'UPCOMING',
         notes: 'Dilation required. Bringing sunglasses recommended.',
         transportationChoice: 'FAMILY_DRIVING',
@@ -66,9 +89,31 @@ class CareSyncAppointmentService implements AppointmentServiceContract {
   async updateTransportationChoice(
     appointmentId: string,
     choice: TransportationChoice,
-    requirements?: MobilityRequirements
+    _requirements?: MobilityRequirements
   ): Promise<{ success: boolean; appointment: Appointment }> {
-    console.info(`[AppointmentService Contract] Updating transport choice for ${appointmentId}: choice=${choice}`);
+    console.info(`[AppointmentService] Updating transport choice for ${appointmentId}: choice=${choice}`);
+
+    try {
+      const res = await fetch(`${this.baseUrl}/appointments/${appointmentId}/transportation?parent_id=p-1`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transportation_choice: choice }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const apt = await this.getAppointmentDetails(appointmentId);
+        return {
+          success: true,
+          appointment: {
+            ...apt,
+            transportationChoice: data.transportation_choice,
+            transportationStatus: data.transportation_status,
+          },
+        };
+      }
+    } catch {
+      console.warn('[AppointmentService] Backend offline during transportation update.');
+    }
 
     const apt = await this.getAppointmentDetails(appointmentId);
     let newStatus: Appointment['transportationStatus'] = 'NOT_NEEDED';
@@ -77,8 +122,6 @@ class CareSyncAppointmentService implements AppointmentServiceContract {
       newStatus = 'REQUESTED';
     } else if (choice === 'FAMILY_DRIVING') {
       newStatus = 'FAMILY_MATCHED';
-    } else if (choice === 'NOT_DECIDED') {
-      newStatus = 'NOT_DECIDED';
     }
 
     const updated: Appointment = {
@@ -87,22 +130,11 @@ class CareSyncAppointmentService implements AppointmentServiceContract {
       transportationStatus: newStatus,
     };
 
-    if (choice === 'NEED_HELP' && requirements) {
-      await this.createTransportationIntent({
-        appointmentId,
-        parentId: apt.parentId,
-        pickupAddress: 'Parent Home Residence',
-        destinationAddress: apt.address,
-        pickupTime: '09:45 AM',
-        mobilityRequirements: requirements,
-      });
-    }
-
     return { success: true, appointment: updated };
   }
 
   async createTransportationIntent(intent: TransportationRequestIntent): Promise<{ success: boolean; requestId: string }> {
-    console.info(`[AppointmentService Contract] Creating TransportationRequestIntent for appointment ${intent.appointmentId}`);
+    console.info(`[AppointmentService] Creating TransportationRequestIntent for appointment ${intent.appointmentId}`);
     return {
       success: true,
       requestId: `trans-${Date.now()}`,
