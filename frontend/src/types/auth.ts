@@ -42,6 +42,10 @@ export interface AuthResponse {
   message?: string;
   token?: string;
   expiresIn?: number;
+  user?: {
+    id?: string;
+    role?: string;
+  };
 }
 
 export interface AuthServiceContract {

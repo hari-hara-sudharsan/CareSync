@@ -11,8 +11,9 @@ def test_parent_has_full_permission():
     assert verify_care_permission(CarePermission.MEDICATION, CareRole.PARENT, []) is True
     assert verify_care_permission(CarePermission.TRANSPORTATION, CareRole.PARENT, []) is True
 
-def test_primary_contact_has_full_permission():
-    assert verify_care_permission(CarePermission.APPOINTMENTS, CareRole.FAMILY, [], is_primary_contact=True) is True
+def test_primary_guardian_and_all_permissions():
+    assert verify_care_permission(CarePermission.APPOINTMENTS, CareRole.PRIMARY_GUARDIAN, ["ALL"]) is True
+    assert verify_care_permission(CarePermission.APPOINTMENTS, CareRole.FAMILY, [], is_primary_contact=True) is False
 
 def test_task_scoped_permissions():
     granted = ["TRANSPORTATION", "ERRANDS"]

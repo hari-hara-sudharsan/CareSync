@@ -29,13 +29,16 @@ def verify_care_permission(
     """
     Attribute-Based Access Control (ABAC) Policy Verification.
     
-    1. Primary Guardians and Parents have full administrative permissions.
-    2. Other roles (Family, Neighbor, Volunteer) require explicit task-scoped permissions.
-    3. Prevents unauthorized data access across parent care circles.
+    1. Parents and Admins have administrative permissions.
+    2. Primary Guardians and Family Members must hold active care network mapping.
+    3. Requires explicit task-scoped permission matching for the requested operation.
     """
-    if user_role in [CareRole.PARENT, CareRole.ADMIN] or is_primary_contact:
+    if user_role in [CareRole.PARENT, CareRole.ADMIN]:
         return True
     
+    if "ALL" in granted_permissions:
+        return True
+
     return required_permission.value in granted_permissions
 
 def enforce_care_permission(
@@ -44,7 +47,7 @@ def enforce_care_permission(
     granted_permissions: List[str],
     is_primary_contact: bool = False,
 ) -> None:
-    """Enforces authorization check, raising HTTP 403 Forbidden if not authorized."""
+    """Enforces task-scoped care permission verification."""
     if not verify_care_permission(required_permission, user_role, granted_permissions, is_primary_contact):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
