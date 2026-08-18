@@ -21,9 +21,11 @@ class HardConstraintFilter:
         if not candidate.get("is_active", True):
             return False
 
-        # 2. Verification Filter (Mandatory for Volunteers)
-        if candidate.get("type") == "VOLUNTEER" and not candidate.get("is_verified", True):
-            return False
+        # 2. Verification & Status Hard Filter
+        v_status = candidate.get("verification_status", "VERIFIED" if candidate.get("is_verified", True) else "UNVERIFIED")
+        if v_status in ["SUSPENDED", "REVOKED", "UNVERIFIED", "PENDING"]:
+            if candidate.get("type") == "VOLUNTEER" or v_status in ["SUSPENDED", "REVOKED"]:
+                return False
 
         # 3. Parent Circle Scope Filter
         if candidate.get("type") == "FAMILY" and candidate.get("parent_id") and candidate.get("parent_id") != target_parent_id:

@@ -8,6 +8,7 @@ from app.models.appointment import Appointment, TransportationRequest
 from app.models.checkin import CheckInEvent
 from app.models.decision import DecisionCard, AuditEvent
 from app.models.idempotency import IdempotencyRecord
+from app.trust.models import VerificationRecord, TaskReliability, TrustEvent, Complaint
 
 __all__ = [
     "BaseModel",
@@ -24,4 +25,8 @@ __all__ = [
     "DecisionCard",
     "AuditEvent",
     "IdempotencyRecord",
+    "VerificationRecord",
+    "TaskReliability",
+    "TrustEvent",
+    "Complaint",
 ]
