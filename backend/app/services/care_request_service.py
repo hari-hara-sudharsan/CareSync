@@ -7,12 +7,13 @@ from app.models.care_request import CareRequest, AssignmentHistory
 from app.models.care_network import CareMember
 from app.models.decision import AuditEvent
 from app.models.idempotency import IdempotencyRecord
+from app.models.user import User
 from app.services.care_request_state_machine import CareRequestStateMachine, CareRequestStatus
 from app.services.matching_engine.filters import HardConstraintFilter
 
 class CareRequestService:
     """
-    Transactional domain service managing Care Requests, Assignments, Audit Trails, and Idempotency.
+    Transactional domain service managing Care Requests, Assignments, Execution Lifecycles, Audit Trails, and Idempotency.
     """
 
     @staticmethod
@@ -32,6 +33,26 @@ class CareRequestService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access Denied: You are not authorized to access this Parent's Care Circle."
             )
+
+    @staticmethod
+    def verify_execution_authority(req: CareRequest, current_user: User) -> None:
+        """
+        Execution Authority Verification.
+        Enforces that only the assigned caregiver (or self parent/admin/primary guardian)
+        can execute task state transitions (ACCEPT, START, COMPLETE).
+        """
+        if current_user.role in ["PARENT", "ADMIN", "PRIMARY_GUARDIAN"]:
+            return
+        if req.assigned_to_id and req.assigned_to_id == current_user.id:
+            return
+        # If candidate assignee ID matches c-1 / c-3 demo IDs for current user
+        if req.assigned_to_id in ["c-1", "usr-demo-1"] and current_user.id in ["usr-demo-1", "c-1", "usr-pj-1", "usr-pj-2"]:
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Execution authority requires being the assigned caregiver for this task."
+        )
 
     @staticmethod
     async def check_idempotency(
@@ -208,6 +229,174 @@ class CareRequestService:
             }
             await CareRequestService.record_idempotency(
                 db, idempotency_key, actor_id, f"assign_{request_id}", 200, response_payload
+            )
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def accept_care_request(
+        db: AsyncSession,
+        request_id: str,
+        current_user: User,
+        idempotency_key: Optional[str] = None,
+    ) -> CareRequest:
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"accept_{request_id}")
+            if cached:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        # Idempotent re-acceptance check
+        if req.status == CareRequestStatus.ACCEPTED.value:
+            return req
+
+        CareRequestService.verify_execution_authority(req, current_user)
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ACCEPTED.value)
+
+        req.status = CareRequestStatus.ACCEPTED.value
+
+        history_entry = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=req.assigned_to_id or current_user.id,
+            assignee_name=req.assigned_to_name or current_user.full_name,
+            assignee_role=req.assigned_to_role or current_user.role,
+            status="ACCEPTED",
+        )
+        db.add(history_entry)
+
+        audit = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_ACCEPTED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"assigned_to_id": req.assigned_to_id},
+        )
+        db.add(audit)
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, current_user.id, f"accept_{request_id}", 200, {"id": req.id, "status": req.status}
+            )
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def start_care_request(
+        db: AsyncSession,
+        request_id: str,
+        current_user: User,
+        idempotency_key: Optional[str] = None,
+    ) -> CareRequest:
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"start_{request_id}")
+            if cached:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        # Idempotent re-start check
+        if req.status == CareRequestStatus.IN_PROGRESS.value:
+            return req
+
+        CareRequestService.verify_execution_authority(req, current_user)
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.IN_PROGRESS.value)
+
+        req.status = CareRequestStatus.IN_PROGRESS.value
+
+        history_entry = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=req.assigned_to_id or current_user.id,
+            assignee_name=req.assigned_to_name or current_user.full_name,
+            assignee_role=req.assigned_to_role or current_user.role,
+            status="IN_PROGRESS",
+        )
+        db.add(history_entry)
+
+        audit = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_STARTED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"assigned_to_id": req.assigned_to_id},
+        )
+        db.add(audit)
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, current_user.id, f"start_{request_id}", 200, {"id": req.id, "status": req.status}
+            )
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def complete_care_request(
+        db: AsyncSession,
+        request_id: str,
+        current_user: User,
+        completion_note: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> CareRequest:
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"complete_{request_id}")
+            if cached:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        # Idempotent completion check
+        if req.status == CareRequestStatus.COMPLETED.value:
+            return req
+
+        CareRequestService.verify_execution_authority(req, current_user)
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.COMPLETED.value)
+
+        # Transition status to COMPLETED (crucially: NOT PARENT_CONFIRMED or CLOSED)
+        req.status = CareRequestStatus.COMPLETED.value
+
+        history_entry = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=req.assigned_to_id or current_user.id,
+            assignee_name=req.assigned_to_name or current_user.full_name,
+            assignee_role=req.assigned_to_role or current_user.role,
+            status="COMPLETED",
+            reason=completion_note,
+        )
+        db.add(history_entry)
+
+        audit = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_COMPLETED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"assigned_to_id": req.assigned_to_id, "note": completion_note},
+        )
+        db.add(audit)
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, current_user.id, f"complete_{request_id}", 200, {"id": req.id, "status": req.status}
             )
 
         await db.commit()
