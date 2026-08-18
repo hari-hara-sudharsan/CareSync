@@ -27,6 +27,16 @@ class ConcernPayload(BaseModel):
     category: str = "OTHER"
     details: Optional[str] = None
 
+class FailurePayload(BaseModel):
+    failure_reason: str = "UNABLE_TO_COMPLETE"
+    details: Optional[str] = None
+
+class DeclinePayload(BaseModel):
+    reason: Optional[str] = None
+
+class CancellationPayload(BaseModel):
+    reason: Optional[str] = None
+
 def map_category_to_permission(category: str) -> CarePermission:
     cat_upper = category.upper() if category else ""
     if "TRANSPORT" in cat_upper:
@@ -150,7 +160,7 @@ async def get_matching_recommendations(
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-    if req.status in ["ASSIGNED", "ACCEPTED", "IN_PROGRESS", "COMPLETED", "PARENT_CONFIRMED", "CLOSED"]:
+    if req.status in ["ASSIGNED", "ACCEPTED", "IN_PROGRESS", "COMPLETED", "PARENT_CONFIRMED", "CLOSED", "CANCELLED"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid Operation: Candidate matching is not permitted for CareRequest in status '{req.status}'."
@@ -319,6 +329,110 @@ async def complete_care_request(
         idempotency_key=idempotency_key,
     )
     return completed_req
+
+@router.post("/{request_id}/decline", summary="Decline Assigned Care Request (Assigned Caregiver)")
+async def decline_care_request(
+    request_id: str,
+    payload: Optional[DeclinePayload] = None,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+    req = res_req.scalars().first()
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+    required_perm = map_category_to_permission(req.category)
+    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+
+    reason = payload.reason if payload else None
+
+    declined_req = await CareRequestService.decline_care_request(
+        db=db,
+        request_id=request_id,
+        current_user=current_user,
+        reason=reason,
+        idempotency_key=idempotency_key,
+    )
+    return declined_req
+
+@router.post("/{request_id}/fail", summary="Report Task Execution Failure (Assigned Caregiver)")
+async def fail_care_request(
+    request_id: str,
+    payload: FailurePayload,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+    req = res_req.scalars().first()
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+    required_perm = map_category_to_permission(req.category)
+    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+
+    failed_req = await CareRequestService.fail_care_request(
+        db=db,
+        request_id=request_id,
+        current_user=current_user,
+        failure_reason=payload.failure_reason,
+        details=payload.details,
+        idempotency_key=idempotency_key,
+    )
+    return failed_req
+
+@router.post("/{request_id}/timeout", summary="Deterministic Execution Timeout Handler")
+async def timeout_care_request(
+    request_id: str,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+    req = res_req.scalars().first()
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+    required_perm = map_category_to_permission(req.category)
+    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+
+    timed_out_req = await CareRequestService.timeout_care_request(
+        db=db,
+        request_id=request_id,
+        actor_id=current_user.id,
+        actor_name=current_user.full_name,
+        idempotency_key=idempotency_key,
+    )
+    return timed_out_req
+
+@router.post("/{request_id}/cancel", summary="Cancel Care Request (Parent / Guardian Policy)")
+async def cancel_care_request(
+    request_id: str,
+    payload: Optional[CancellationPayload] = None,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+    req = res_req.scalars().first()
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+    required_perm = map_category_to_permission(req.category)
+    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+
+    reason = payload.reason if payload else None
+
+    cancelled_req = await CareRequestService.cancel_care_request(
+        db=db,
+        request_id=request_id,
+        current_user=current_user,
+        cancellation_reason=reason,
+        idempotency_key=idempotency_key,
+    )
+    return cancelled_req
 
 @router.post("/{request_id}/confirm", summary="Parent Confirm Care Request Completion")
 async def confirm_care_request(

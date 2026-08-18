@@ -15,21 +15,25 @@ class CareRequestStatus(str, Enum):
     CLOSED = "CLOSED"
     ESCALATED = "ESCALATED"
     FAILED = "FAILED"
+    TIMEOUT = "TIMEOUT"
+    CANCELLED = "CANCELLED"
 
 # Explicit Valid State Transition Mapping
 VALID_TRANSITIONS: Dict[CareRequestStatus, Set[CareRequestStatus]] = {
-    CareRequestStatus.CREATED: {CareRequestStatus.CLASSIFIED, CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.CLOSED},
-    CareRequestStatus.CLASSIFIED: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.CLOSED},
-    CareRequestStatus.PENDING_ASSIGNMENT: {CareRequestStatus.ASSIGNED, CareRequestStatus.ESCALATED, CareRequestStatus.CLOSED},
-    CareRequestStatus.ASSIGNED: {CareRequestStatus.ACCEPTED, CareRequestStatus.DECLINED, CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.ESCALATED, CareRequestStatus.CLOSED},
-    CareRequestStatus.ACCEPTED: {CareRequestStatus.IN_PROGRESS, CareRequestStatus.DECLINED, CareRequestStatus.ESCALATED, CareRequestStatus.CLOSED},
-    CareRequestStatus.DECLINED: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.ESCALATED, CareRequestStatus.CLOSED},
-    CareRequestStatus.IN_PROGRESS: {CareRequestStatus.COMPLETED, CareRequestStatus.FAILED, CareRequestStatus.ESCALATED, CareRequestStatus.CLOSED},
+    CareRequestStatus.CREATED: {CareRequestStatus.CLASSIFIED, CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
+    CareRequestStatus.CLASSIFIED: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
+    CareRequestStatus.PENDING_ASSIGNMENT: {CareRequestStatus.ASSIGNED, CareRequestStatus.ESCALATED, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
+    CareRequestStatus.ASSIGNED: {CareRequestStatus.ACCEPTED, CareRequestStatus.DECLINED, CareRequestStatus.TIMEOUT, CareRequestStatus.ESCALATED, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
+    CareRequestStatus.ACCEPTED: {CareRequestStatus.IN_PROGRESS, CareRequestStatus.DECLINED, CareRequestStatus.TIMEOUT, CareRequestStatus.ESCALATED, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
+    CareRequestStatus.DECLINED: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.ESCALATED, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
+    CareRequestStatus.IN_PROGRESS: {CareRequestStatus.COMPLETED, CareRequestStatus.FAILED, CareRequestStatus.ESCALATED, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
     CareRequestStatus.COMPLETED: {CareRequestStatus.PARENT_CONFIRMED, CareRequestStatus.CLOSED},
     CareRequestStatus.PARENT_CONFIRMED: {CareRequestStatus.CLOSED},
     CareRequestStatus.CLOSED: set(), # Terminal state
-    CareRequestStatus.ESCALATED: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.ASSIGNED, CareRequestStatus.CLOSED},
-    CareRequestStatus.FAILED: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.ESCALATED, CareRequestStatus.CLOSED},
+    CareRequestStatus.CANCELLED: set(), # Terminal state
+    CareRequestStatus.ESCALATED: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.ASSIGNED, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
+    CareRequestStatus.FAILED: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.ESCALATED, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
+    CareRequestStatus.TIMEOUT: {CareRequestStatus.PENDING_ASSIGNMENT, CareRequestStatus.ESCALATED, CareRequestStatus.CANCELLED, CareRequestStatus.CLOSED},
 }
 
 class CareRequestStateMachine:

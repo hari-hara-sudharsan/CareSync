@@ -289,6 +289,69 @@ class CareSyncCareRequestService implements CareRequestServiceContract {
     return { success: true, status: 'COMPLETED' };
   }
 
+  async declineTask(requestId: string, reason?: string): Promise<{ success: boolean; status: string }> {
+    console.info(`[CareRequestService] Declining care request ${requestId}, reason=${reason}`);
+    try {
+      const res = await fetch(`${this.baseUrl}/care-requests/${requestId}/decline`, {
+        method: 'POST',
+        headers: {
+          ...authService.getAuthHeaders(),
+          'Idempotency-Key': `decline-${requestId}-${Date.now()}`,
+        },
+        body: JSON.stringify({ reason }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, status: data.status || 'PENDING_ASSIGNMENT' };
+      }
+    } catch {
+      console.warn('[CareRequestService] Backend offline during decline. Using fallback.');
+    }
+    return { success: true, status: 'PENDING_ASSIGNMENT' };
+  }
+
+  async failTask(requestId: string, reason?: string, details?: string): Promise<{ success: boolean; status: string }> {
+    console.info(`[CareRequestService] Reporting failure for care request ${requestId}, reason=${reason}`);
+    try {
+      const res = await fetch(`${this.baseUrl}/care-requests/${requestId}/fail`, {
+        method: 'POST',
+        headers: {
+          ...authService.getAuthHeaders(),
+          'Idempotency-Key': `fail-${requestId}-${Date.now()}`,
+        },
+        body: JSON.stringify({ failure_reason: reason || 'UNABLE_TO_COMPLETE', details }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, status: data.status || 'ESCALATED' };
+      }
+    } catch {
+      console.warn('[CareRequestService] Backend offline during failure reporting. Using fallback.');
+    }
+    return { success: true, status: 'ESCALATED' };
+  }
+
+  async cancelCareRequest(requestId: string, reason?: string): Promise<{ success: boolean; status: string }> {
+    console.info(`[CareRequestService] Cancelling care request ${requestId}`);
+    try {
+      const res = await fetch(`${this.baseUrl}/care-requests/${requestId}/cancel`, {
+        method: 'POST',
+        headers: {
+          ...authService.getAuthHeaders(),
+          'Idempotency-Key': `cancel-${requestId}-${Date.now()}`,
+        },
+        body: JSON.stringify({ reason }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, status: data.status || 'CANCELLED' };
+      }
+    } catch {
+      console.warn('[CareRequestService] Backend offline during cancel. Using fallback.');
+    }
+    return { success: true, status: 'CANCELLED' };
+  }
+
   async confirmCareRequest(requestId: string): Promise<{ success: boolean; status: string }> {
     console.info(`[CareRequestService] Parent confirming care request ${requestId}`);
     try {

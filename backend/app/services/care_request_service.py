@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 
 from app.models.care_request import CareRequest, AssignmentHistory
 from app.models.care_network import CareMember
-from app.models.decision import AuditEvent
+from app.models.decision import DecisionCard, AuditEvent
 from app.models.idempotency import IdempotencyRecord
 from app.models.user import User
 from app.services.care_request_state_machine import CareRequestStateMachine, CareRequestStatus
@@ -13,7 +13,7 @@ from app.services.matching_engine.filters import HardConstraintFilter
 
 class CareRequestService:
     """
-    Transactional domain service managing Care Requests, Assignments, Execution Lifecycles, Parent Confirmation, Audit Trails, and Idempotency.
+    Transactional domain service managing Care Requests, Assignments, Execution Lifecycles, Parent Confirmation, Failure Recovery, Audit Trails, and Idempotency.
     """
 
     @staticmethod
@@ -39,13 +39,12 @@ class CareRequestService:
         """
         Execution Authority Verification.
         Enforces that only the assigned caregiver (or self parent/admin/primary guardian)
-        can execute task state transitions (ACCEPT, START, COMPLETE).
+        can execute task state transitions (ACCEPT, START, COMPLETE, FAIL, DECLINE).
         """
         if current_user.role in ["PARENT", "ADMIN", "PRIMARY_GUARDIAN"]:
             return
         if req.assigned_to_id and req.assigned_to_id == current_user.id:
             return
-        # If candidate assignee ID matches c-1 / c-3 demo IDs for current user
         if req.assigned_to_id in ["c-1", "usr-demo-1"] and current_user.id in ["usr-demo-1", "c-1", "usr-pj-1", "usr-pj-2"]:
             return
 
@@ -57,10 +56,9 @@ class CareRequestService:
     @staticmethod
     def verify_parent_confirmation_authority(req: CareRequest, current_user: User) -> None:
         """
-        Parent Confirmation Authority Verification.
+        Parent Confirmation / Cancellation Authority Verification.
         Enforces that only the parent or primary guardian representing the parent context
-        can confirm task completion or raise a parent concern.
-        Caregiver-only users cannot confirm completion on behalf of the parent.
+        can confirm completion, cancel requests, or raise concerns.
         """
         if current_user.role in ["PARENT", "PRIMARY_GUARDIAN", "ADMIN"]:
             return
@@ -69,7 +67,7 @@ class CareRequestService:
 
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access Denied: Only the parent or primary guardian can confirm task completion."
+            detail="Access Denied: Only the parent or primary guardian holds this authority."
         )
 
     @staticmethod
@@ -164,7 +162,6 @@ class CareRequestService:
         candidate_dto: Optional[Dict[str, Any]] = None,
         idempotency_key: Optional[str] = None,
     ) -> CareRequest:
-        # Step 1: Idempotency Check
         if idempotency_key:
             res_idemp = await db.execute(
                 select(IdempotencyRecord).where(
@@ -177,27 +174,22 @@ class CareRequestService:
                 res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
                 return res_req.scalars().first()
 
-        # Step 2: Fetch CareRequest with Row Locking (SELECT FOR UPDATE)
         result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
         req = result.scalars().first()
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-        # Step 3: Check for Same Assignee (Idempotent call)
         if req.status == CareRequestStatus.ASSIGNED.value and req.assigned_to_id == assignee_id:
             return req
 
-        # Step 4: Check for Concurrency Conflict (Already assigned to someone else)
         if req.status == CareRequestStatus.ASSIGNED.value and req.assigned_to_id != assignee_id:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Conflict: CareRequest '{request_id}' is already assigned to another caregiver."
             )
 
-        # Step 5: Validate State Machine Transition (Rejects CLOSED/COMPLETED/IN_PROGRESS)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ASSIGNED.value)
 
-        # Step 6: Candidate Revalidation at Assignment Time
         if candidate_dto:
             if not HardConstraintFilter.is_eligible(candidate_dto, req, req.parent_id):
                 raise HTTPException(
@@ -205,13 +197,11 @@ class CareRequestService:
                     detail=f"Ineligible Candidate: Candidate '{assignee_name}' fails current safety, verification, or permission constraints."
                 )
 
-        # Step 7: Atomic Assignment State Mutation
         req.status = CareRequestStatus.ASSIGNED.value
         req.assigned_to_id = assignee_id
         req.assigned_to_name = assignee_name
         req.assigned_to_role = assignee_role
 
-        # Step 8: Record Assignment History Entry
         history_entry = AssignmentHistory(
             care_request_id=req.id,
             assignee_id=assignee_id,
@@ -221,7 +211,6 @@ class CareRequestService:
         )
         db.add(history_entry)
 
-        # Step 9: Immutable Audit Log Event
         audit = AuditEvent(
             actor_id=actor_id,
             actor_name=actor_name,
@@ -271,7 +260,6 @@ class CareRequestService:
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-        # Idempotent re-acceptance check
         if req.status == CareRequestStatus.ACCEPTED.value:
             return req
 
@@ -326,7 +314,6 @@ class CareRequestService:
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-        # Idempotent re-start check
         if req.status == CareRequestStatus.IN_PROGRESS.value:
             return req
 
@@ -382,14 +369,12 @@ class CareRequestService:
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-        # Idempotent completion check
         if req.status == CareRequestStatus.COMPLETED.value:
             return req
 
         CareRequestService.verify_execution_authority(req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.COMPLETED.value)
 
-        # Transition status to COMPLETED (crucially: NOT PARENT_CONFIRMED or CLOSED)
         req.status = CareRequestStatus.COMPLETED.value
 
         history_entry = AssignmentHistory(
@@ -428,11 +413,6 @@ class CareRequestService:
         current_user: User,
         idempotency_key: Optional[str] = None,
     ) -> CareRequest:
-        """
-        Parent Confirmation Journey Endpoint Logic.
-        Transitions state COMPLETED -> PARENT_CONFIRMED -> CLOSED.
-        Enforces parent authority, row-level locking, and immutable audit logs.
-        """
         if idempotency_key:
             cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"confirm_{request_id}")
             if cached:
@@ -444,14 +424,12 @@ class CareRequestService:
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-        # Idempotent re-confirmation / closed check
         if req.status == CareRequestStatus.CLOSED.value:
             return req
 
         CareRequestService.verify_parent_confirmation_authority(req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.PARENT_CONFIRMED.value)
 
-        # Transition COMPLETED -> PARENT_CONFIRMED -> CLOSED
         req.status = CareRequestStatus.PARENT_CONFIRMED.value
 
         history_confirmed = AssignmentHistory(
@@ -473,7 +451,6 @@ class CareRequestService:
         )
         db.add(audit_confirmed)
 
-        # Transition PARENT_CONFIRMED -> CLOSED
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.CLOSED.value)
         req.status = CareRequestStatus.CLOSED.value
 
@@ -506,6 +483,318 @@ class CareRequestService:
         return req
 
     @staticmethod
+    async def decline_care_request(
+        db: AsyncSession,
+        request_id: str,
+        current_user: User,
+        reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> CareRequest:
+        """
+        Decline Assigned Care Request.
+        Transitions state ASSIGNED -> DECLINED -> PENDING_ASSIGNMENT.
+        Clears assignee metadata and returns task to pending matching pool without auto-assigning.
+        """
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"decline_{request_id}")
+            if cached:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        if req.status == CareRequestStatus.PENDING_ASSIGNMENT.value and req.assigned_to_id is None:
+            return req
+
+        CareRequestService.verify_execution_authority(req, current_user)
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.DECLINED.value)
+
+        old_assignee_id = req.assigned_to_id
+        old_assignee_name = req.assigned_to_name or current_user.full_name
+        old_assignee_role = req.assigned_to_role or current_user.role
+
+        # Transition ASSIGNED -> DECLINED -> PENDING_ASSIGNMENT
+        req.status = CareRequestStatus.DECLINED.value
+        history_declined = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=old_assignee_id or current_user.id,
+            assignee_name=old_assignee_name,
+            assignee_role=old_assignee_role,
+            status="DECLINED",
+            reason=reason or "Declined by assigned caregiver",
+        )
+        db.add(history_declined)
+
+        audit_declined = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_DECLINED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"previous_assignee_id": old_assignee_id, "reason": reason},
+        )
+        db.add(audit_declined)
+
+        # Unassign & return to PENDING_ASSIGNMENT pool for human re-matching
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.PENDING_ASSIGNMENT.value)
+        req.status = CareRequestStatus.PENDING_ASSIGNMENT.value
+        req.assigned_to_id = None
+        req.assigned_to_name = None
+        req.assigned_to_role = None
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, current_user.id, f"decline_{request_id}", 200, {"id": req.id, "status": req.status}
+            )
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def fail_care_request(
+        db: AsyncSession,
+        request_id: str,
+        current_user: User,
+        failure_reason: str = "UNABLE_TO_COMPLETE",
+        details: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> CareRequest:
+        """
+        Report Execution Failure during Task Execution.
+        Transitions state IN_PROGRESS -> FAILED -> ESCALATED and creates DecisionCard in Decision Inbox.
+        """
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"fail_{request_id}")
+            if cached:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        if req.status == CareRequestStatus.ESCALATED.value:
+            return req
+
+        CareRequestService.verify_execution_authority(req, current_user)
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.FAILED.value)
+
+        req.status = CareRequestStatus.FAILED.value
+        history_failed = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=req.assigned_to_id or current_user.id,
+            assignee_name=req.assigned_to_name or current_user.full_name,
+            assignee_role=req.assigned_to_role or current_user.role,
+            status="FAILED",
+            reason=f"Failure Reason: {failure_reason}. Details: {details or 'None'}",
+        )
+        db.add(history_failed)
+
+        audit_failed = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_FAILED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"failure_reason": failure_reason, "details": details},
+        )
+        db.add(audit_failed)
+
+        # Transition FAILED -> ESCALATED
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ESCALATED.value)
+        req.status = CareRequestStatus.ESCALATED.value
+
+        # Create DecisionCard in Decision Inbox for human decision
+        card = DecisionCard(
+            parent_id=req.parent_id,
+            related_entity_id=req.id,
+            type="TASK_FAILURE_ESCALATION",
+            priority="HIGH",
+            status="PENDING",
+            title=f"Task Execution Issue: {req.title}",
+            summary=f"Caregiver {req.assigned_to_name or 'assigned helper'} reported a failure ({failure_reason}). Human decision required to retry, reassign, or cancel.",
+            reason=details,
+            actions=[
+                {"key": "rematch_candidate", "label": "Find New Caregiver"},
+                {"key": "cancel_request", "label": "Cancel Request"},
+            ],
+        )
+        db.add(card)
+
+        audit_escalated = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_ESCALATED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"escalation_type": "TASK_FAILURE", "decision_card_id": card.id},
+        )
+        db.add(audit_escalated)
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, current_user.id, f"fail_{request_id}", 200, {"id": req.id, "status": req.status}
+            )
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def timeout_care_request(
+        db: AsyncSession,
+        request_id: str,
+        actor_id: str = "system",
+        actor_name: str = "System Timeout Worker",
+        idempotency_key: Optional[str] = None,
+    ) -> CareRequest:
+        """
+        Deterministic Assignment / Execution Timeout Handler.
+        Transitions state ASSIGNED / ACCEPTED -> TIMEOUT -> ESCALATED and creates DecisionCard.
+        """
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, actor_id, f"timeout_{request_id}")
+            if cached:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        if req.status == CareRequestStatus.ESCALATED.value:
+            return req
+
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.TIMEOUT.value)
+
+        req.status = CareRequestStatus.TIMEOUT.value
+        history_timeout = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=req.assigned_to_id or "system",
+            assignee_name=req.assigned_to_name or "Assigned Caregiver",
+            assignee_role=req.assigned_to_role or "Caregiver",
+            status="TIMEOUT",
+            reason="Task execution timed out without progress update",
+        )
+        db.add(history_timeout)
+
+        audit_timeout = AuditEvent(
+            actor_id=actor_id,
+            actor_name=actor_name,
+            action="CARE_REQUEST_TIMEOUT",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"previous_assignee_id": req.assigned_to_id},
+        )
+        db.add(audit_timeout)
+
+        # Transition TIMEOUT -> ESCALATED
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ESCALATED.value)
+        req.status = CareRequestStatus.ESCALATED.value
+
+        card = DecisionCard(
+            parent_id=req.parent_id,
+            related_entity_id=req.id,
+            type="TASK_TIMEOUT_ESCALATION",
+            priority="HIGH",
+            status="PENDING",
+            title=f"Task Timed Out: {req.title}",
+            summary=f"Care task for {req.parent_id} timed out without progress. Human decision required.",
+            actions=[
+                {"key": "rematch_candidate", "label": "Find New Caregiver"},
+                {"key": "cancel_request", "label": "Cancel Request"},
+            ],
+        )
+        db.add(card)
+
+        audit_escalated = AuditEvent(
+            actor_id=actor_id,
+            actor_name=actor_name,
+            action="CARE_REQUEST_ESCALATED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"escalation_type": "TIMEOUT", "decision_card_id": card.id},
+        )
+        db.add(audit_escalated)
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, actor_id, f"timeout_{request_id}", 200, {"id": req.id, "status": req.status}
+            )
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def cancel_care_request(
+        db: AsyncSession,
+        request_id: str,
+        current_user: User,
+        cancellation_reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> CareRequest:
+        """
+        Cancel Care Request (Parent / Guardian Policy).
+        Transitions active state -> CANCELLED.
+        Rejects cancellation of COMPLETED or CLOSED tasks.
+        """
+        if idempotency_key:
+            cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"cancel_{request_id}")
+            if cached:
+                res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
+                return res_req.scalars().first()
+
+        result = await db.execute(select(CareRequest).where(CareRequest.id == request_id).with_for_update())
+        req = result.scalars().first()
+        if not req:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+        if req.status == CareRequestStatus.CANCELLED.value:
+            return req
+
+        CareRequestService.verify_parent_confirmation_authority(req, current_user)
+        CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.CANCELLED.value)
+
+        old_status = req.status
+        req.status = CareRequestStatus.CANCELLED.value
+
+        history_cancelled = AssignmentHistory(
+            care_request_id=req.id,
+            assignee_id=current_user.id,
+            assignee_name=current_user.full_name,
+            assignee_role="Parent / Guardian",
+            status="CANCELLED",
+            reason=cancellation_reason or "Cancelled by parent/guardian",
+        )
+        db.add(history_cancelled)
+
+        audit_cancelled = AuditEvent(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            action="CARE_REQUEST_CANCELLED",
+            resource_type="CareRequest",
+            resource_id=req.id,
+            details={"previous_status": old_status, "reason": cancellation_reason},
+        )
+        db.add(audit_cancelled)
+
+        if idempotency_key:
+            await CareRequestService.record_idempotency(
+                db, idempotency_key, current_user.id, f"cancel_{request_id}", 200, {"id": req.id, "status": req.status}
+            )
+
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
     async def raise_care_request_concern(
         db: AsyncSession,
         request_id: str,
@@ -514,10 +803,6 @@ class CareRequestService:
         details: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Parent Concern / 'Something isn't right' Intent Handler.
-        Creates a structured concern record without auto-guilt determination or auto-suspension of caregiver.
-        """
         if idempotency_key:
             cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"concern_{request_id}")
             if cached:
@@ -530,7 +815,6 @@ class CareRequestService:
 
         CareRequestService.verify_parent_confirmation_authority(req, current_user)
 
-        # Log AssignmentHistory entry for Parent Concern Intent
         history_entry = AssignmentHistory(
             care_request_id=req.id,
             assignee_id=current_user.id,
@@ -541,7 +825,6 @@ class CareRequestService:
         )
         db.add(history_entry)
 
-        # Log AuditEvent
         audit = AuditEvent(
             actor_id=current_user.id,
             actor_name=current_user.full_name,
@@ -587,13 +870,11 @@ class CareRequestService:
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest {request_id} not found.")
 
-        # Validate State Machine Transition
         CareRequestStateMachine.validate_transition(req.status, target_status)
 
         old_status = req.status
         req.status = target_status
 
-        # If Declined, unassign and clear active assignee
         if target_status == CareRequestStatus.DECLINED.value:
             history = AssignmentHistory(
                 care_request_id=req.id,

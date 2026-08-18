@@ -97,7 +97,7 @@ async def test_caregiver_cannot_confirm_task(async_db: AsyncSession):
             request_id=req.id,
             current_user=caregiver,
         )
-    assert "Only the parent or primary guardian can confirm task completion" in str(exc_info.value)
+    assert "Only the parent or primary guardian holds this authority" in str(exc_info.value)
 
 @pytest.mark.asyncio
 async def test_wrong_parent_context_returns_403(client: AsyncClient, async_db: AsyncSession):
