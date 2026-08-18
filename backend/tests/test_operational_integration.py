@@ -11,7 +11,8 @@ async def test_scenario_a_checkin_creates_care_request(client: AsyncClient):
         "parent_id": "p-1",
         "feeling_branch": "NEED_HELP",
         "status_summary": "Dizzy this morning and need help getting groceries",
-        "note": "Felt lightheaded after waking up",
+        "need_category": "ERRANDS",
+        "urgency": "HIGH",
     }
 
     res = await client.post("/api/v1/check-ins", json=payload)
@@ -20,10 +21,9 @@ async def test_scenario_a_checkin_creates_care_request(client: AsyncClient):
 
     assert data["success"] is True
     assert data["feeling_branch"] == "NEED_HELP"
-    assert data["care_request_created"] is True
-    assert data["care_request_id"] is not None
-
-    care_req_id = data["care_request_id"]
+    assert data["requires_escalation"] is True
+    assert data["care_request"] is not None
+    care_req_id = data["care_request"]["id"]
 
     # Verify CareRequest was persisted and listed in PENDING_ASSIGNMENT
     res_list = await client.get("/api/v1/care-requests?parent_id=p-1")
@@ -32,7 +32,7 @@ async def test_scenario_a_checkin_creates_care_request(client: AsyncClient):
 
     matched_req = next((r for r in requests if r["id"] == care_req_id), None)
     assert matched_req is not None
-    assert matched_req["category"] == "CHECK_IN"
+    assert matched_req["category"] == "ERRANDS"
     assert matched_req["status"] == "PENDING_ASSIGNMENT"
     assert matched_req["priority"] == "HIGH"
 

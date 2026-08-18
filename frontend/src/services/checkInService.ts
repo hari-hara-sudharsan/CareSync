@@ -4,28 +4,35 @@ import type {
   CareRequestIntent,
   CheckInServiceContract,
 } from '@/types/checkin';
+import { authService } from '@/services/authService';
 
 /**
  * CareSync Check-In Service
  * 
  * Submits structured check-in domain events to FastAPI (/api/v1/check-ins).
- * Automatically triggers CareRequest creation when parent requests help.
+ * Propagates Bearer authorization headers and idempotency keys.
  */
 class CareSyncCheckInService implements CheckInServiceContract {
   public baseUrl = 'http://localhost:8000/api/v1';
 
   async submitCheckIn(checkInData: Omit<CheckIn, 'id' | 'timestamp'>): Promise<CheckInResult> {
-    console.info(`[CheckInService] Submitting check-in for parent ${checkInData.parentId}: mood=${checkInData.mood}`);
+    const parentId = checkInData.parentId || authService.getActiveParentId();
+    const idempotencyKey = `chk_idx_${parentId}_${Date.now()}`;
+    console.info(`[CheckInService] Submitting check-in for parent ${parentId}: mood=${checkInData.mood}`);
 
     try {
       const res = await fetch(`${this.baseUrl}/check-ins`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          ...authService.getAuthHeaders(),
+          'X-Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
-          parent_id: checkInData.parentId,
-          feeling_branch: checkInData.mood,
-          status_summary: checkInData.notes || `Check-in recorded: ${checkInData.mood}`,
-          note: checkInData.notes,
+          parent_id: parentId,
+          feeling_branch: checkInData.mood === 'WELL' ? 'WELL' : 'NEED_HELP',
+          status_summary: checkInData.notes || `Daily check-in: ${checkInData.mood}`,
+          need_category: checkInData.needCategory || 'ERRANDS',
+          urgency: checkInData.urgency === 'HIGH' ? 'HIGH' : 'NORMAL',
         }),
       });
       if (res.ok) {
@@ -33,8 +40,8 @@ class CareSyncCheckInService implements CheckInServiceContract {
         return {
           success: true,
           checkInId: data.checkin_id,
-          careRequestId: data.care_request_id || undefined,
-          escalationStatus: data.care_request_created ? 'PRIMARY_GUARDIAN_NOTIFIED' : 'NONE',
+          careRequestId: data.care_request ? data.care_request.id : undefined,
+          escalationStatus: data.requires_escalation ? 'PRIMARY_GUARDIAN_NOTIFIED' : 'NONE',
           message: 'Check-in recorded successfully on CareSync backend.',
         };
       }
@@ -48,11 +55,8 @@ class CareSyncCheckInService implements CheckInServiceContract {
     if (checkInData.mood === 'URGENT') {
       escalation = 'EMERGENCY_PROMPTED';
       generatedReqId = `req-urg-${Date.now()}`;
-    } else if (checkInData.mood === 'CONCERN') {
-      escalation = 'PRIMARY_GUARDIAN_NOTIFIED';
-      generatedReqId = `req-con-${Date.now()}`;
     } else if (checkInData.mood === 'NEED_HELP') {
-      escalation = 'VOLUNTEER_ALERTED';
+      escalation = 'PRIMARY_GUARDIAN_NOTIFIED';
       generatedReqId = `req-help-${Date.now()}`;
     }
 
@@ -67,7 +71,9 @@ class CareSyncCheckInService implements CheckInServiceContract {
 
   async getCheckInHistory(parentId: string): Promise<CheckIn[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/check-ins?parent_id=${parentId}`);
+      const res = await fetch(`${this.baseUrl}/check-ins?parent_id=${parentId}`, {
+        headers: authService.getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         return data.map((item: Record<string, unknown>) => ({
@@ -76,7 +82,7 @@ class CareSyncCheckInService implements CheckInServiceContract {
           timestamp: String(item.created_at),
           mood: item.feeling_branch as CheckIn['mood'],
           urgency: 'MEDIUM',
-          notes: item.note ? String(item.note) : undefined,
+          notes: item.status_summary ? String(item.status_summary) : undefined,
         }));
       }
     } catch {
