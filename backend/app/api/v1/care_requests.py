@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
+from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.api.deps import get_current_user, verify_parent_authorization
@@ -15,6 +16,9 @@ from app.services.matching_engine.matching_service import MatchingEngineService
 from app.core.authorization import CarePermission
 
 router = APIRouter()
+
+class MatchingPayload(BaseModel):
+    custom_candidate_pool: Optional[List[Dict[str, Any]]] = None
 
 def map_category_to_permission(category: str) -> CarePermission:
     cat_upper = category.upper() if category else ""
@@ -51,14 +55,6 @@ async def get_care_request_detail(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Get Care Request Detail Endpoint.
-    
-    1. Fetches CareRequest by request_id. Raises 404 if missing.
-    2. Maps category to required CarePermission.
-    3. Enforces verify_parent_authorization (Active CareMember, Parent Context, Category Permission).
-    4. Fetches AssignmentHistory and returns structured payload.
-    """
     res = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
     req = res.scalars().first()
     if not req:
@@ -70,7 +66,6 @@ async def get_care_request_detail(
     required_perm = map_category_to_permission(req.category)
     await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
-    # Fetch History
     res_hist = await db.execute(
         select(AssignmentHistory)
         .where(AssignmentHistory.care_request_id == request_id)
@@ -139,66 +134,86 @@ async def create_care_request(
 @router.post("/{request_id}/match", summary="Get Candidate Recommendations (Matching Engine)")
 async def get_matching_recommendations(
     request_id: str,
+    payload: Optional[MatchingPayload] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Candidate Matching Engine Endpoint.
+    
+    1. Fetches CareRequest. Raises 404 if missing.
+    2. Validates CareRequest status (rejects matching for assigned/completed/closed requests).
+    3. Enforces task-scoped permission & parent context authorization.
+    4. Evaluates candidate pool using HardConstraintFilter, FamilyFirstScoring, and MatchExplainer.
+    5. Returns Top-K explainable candidate recommendations.
+    6. Crucially: Matching does NOT mutate CareRequest state or assign anyone.
+    """
     res = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
     req = res.scalars().first()
     if not req:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest {request_id} not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
+
+    if req.status in ["ASSIGNED", "ACCEPTED", "IN_PROGRESS", "COMPLETED", "PARENT_CONFIRMED", "CLOSED"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid Operation: Candidate matching is not permitted for CareRequest in status '{req.status}'."
+        )
 
     required_perm = map_category_to_permission(req.category)
     await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
-    # Candidate Pool for Matching Engine Evaluation
-    candidate_pool = [
-        {
-            "id": "c-1",
-            "name": "David Woodson",
-            "relationship": "Son",
-            "type": "FAMILY",
-            "is_active": True,
-            "is_available": True,
-            "is_primary_contact": True,
-            "parent_id": req.parent_id,
-            "distance_km": 2.5,
-            "reliability_score": 4.9,
-            "permissions": ["TRANSPORTATION", "ERRANDS", "MEDICATION", "CHECK_INS"],
-            "has_transport_capability": True,
-            "phone": "+1 (555) 234-5678",
-        },
-        {
-            "id": "c-2",
-            "name": "Sarah Woodson",
-            "relationship": "Daughter",
-            "type": "FAMILY",
-            "is_active": True,
-            "is_available": True,
-            "is_primary_contact": False,
-            "parent_id": req.parent_id,
-            "distance_km": 5.0,
-            "reliability_score": 4.8,
-            "permissions": ["TRANSPORTATION", "ERRANDS", "CHECK_INS"],
-            "has_transport_capability": True,
-            "phone": "+1 (555) 876-5432",
-        },
-        {
-            "id": "c-3",
-            "name": "Priya Sharma",
-            "relationship": "Verified Volunteer",
-            "type": "VOLUNTEER",
-            "is_active": True,
-            "is_verified": True,
-            "is_available": True,
-            "distance_km": 1.4,
-            "reliability_score": 4.9,
-            "permissions": ["TRANSPORTATION", "ERRANDS"],
-            "has_transport_capability": True,
-            "phone": "+1 (555) 345-6789",
-        },
-    ]
+    if payload and payload.custom_candidate_pool is not None:
+        candidate_pool = payload.custom_candidate_pool
+    else:
+        candidate_pool = [
+            {
+                "id": "c-1",
+                "name": "David Woodson",
+                "relationship": "Son",
+                "type": "FAMILY",
+                "is_active": True,
+                "is_available": True,
+                "is_primary_contact": True,
+                "parent_id": req.parent_id,
+                "distance_km": 2.5,
+                "reliability_score": 4.9,
+                "permissions": ["TRANSPORTATION", "ERRANDS", "MEDICATION", "CHECK_INS", "PHARMACY"],
+                "has_transport_capability": True,
+                "phone": "+1 (555) 234-5678",
+            },
+            {
+                "id": "c-2",
+                "name": "Sarah Woodson",
+                "relationship": "Daughter",
+                "type": "FAMILY",
+                "is_active": True,
+                "is_available": True,
+                "is_primary_contact": False,
+                "parent_id": req.parent_id,
+                "distance_km": 5.0,
+                "reliability_score": 4.8,
+                "permissions": ["TRANSPORTATION", "ERRANDS", "CHECK_INS"],
+                "has_transport_capability": True,
+                "phone": "+1 (555) 876-5432",
+            },
+            {
+                "id": "c-3",
+                "name": "Priya Sharma",
+                "relationship": "Verified Volunteer",
+                "type": "VOLUNTEER",
+                "is_active": True,
+                "is_verified": True,
+                "verification_status": "VERIFIED",
+                "is_available": True,
+                "distance_km": 1.4,
+                "reliability_score": 4.9,
+                "permissions": ["TRANSPORTATION", "ERRANDS", "PHARMACY", "MEDICATION", "CHECK_INS"],
+                "has_transport_capability": True,
+                "phone": "+1 (555) 345-6789",
+            },
+        ]
 
-    recommendation = MatchingEngineService.match_candidates(req, candidate_pool)
+    recommendation = MatchingEngineService.match_candidates(req, candidate_pool, top_k=5)
     return recommendation
 
 @router.post("/{request_id}/assign", summary="Assign Care Request to Candidate (Atomic Transaction)")

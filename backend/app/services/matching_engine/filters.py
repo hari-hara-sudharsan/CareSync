@@ -1,6 +1,4 @@
 from typing import List, Optional, Dict, Any
-from app.models.care_network import CareMember
-from app.models.user import User
 from app.models.care_request import CareRequest
 
 class HardConstraintFilter:
@@ -21,7 +19,7 @@ class HardConstraintFilter:
         if not candidate.get("is_active", True):
             return False
 
-        # 2. Verification & Status Hard Filter
+        # 2. Verification & Status Hard Filter (Suspended/Revoked/Unverified Excluded)
         v_status = candidate.get("verification_status", "VERIFIED" if candidate.get("is_verified", True) else "UNVERIFIED")
         if v_status in ["SUSPENDED", "REVOKED", "UNVERIFIED", "PENDING"]:
             if candidate.get("type") == "VOLUNTEER" or v_status in ["SUSPENDED", "REVOKED"]:
@@ -34,8 +32,9 @@ class HardConstraintFilter:
         # 4. Task Permission Check
         granted_permissions: List[str] = candidate.get("permissions", [])
         required_permission = request.category
-        if required_permission not in granted_permissions and candidate.get("type") != "FAMILY":
-            return False
+        if granted_permissions is not None and len(granted_permissions) > 0:
+            if required_permission not in granted_permissions and "ALL" not in granted_permissions:
+                return False
 
         # 5. Availability Check
         if not candidate.get("is_available", True):
