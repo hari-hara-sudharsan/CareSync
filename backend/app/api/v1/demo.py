@@ -1,9 +1,10 @@
 import logging
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
 from app.models.parent import ParentProfile
@@ -23,7 +24,15 @@ async def reset_demo_environment(db: AsyncSession = Depends(get_db)) -> Dict[str
     """
     Resets the CareSync presentation database to a clean, deterministic seed state.
     Provides a repeatable baseline for the 5-minute hackathon live demonstration.
+    Enforces DEMO_RESET_ENABLED flag to prevent execution in production environments.
     """
+    if not settings.DEMO_RESET_ENABLED:
+        logger.warning("Attempted execution of POST /api/v1/demo/reset when DEMO_RESET_ENABLED is False.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo reset endpoint is disabled in production environments.",
+        )
+
     logger.info("Executing demo database reset to baseline presentation dataset...")
 
     # 1. Clean existing presentation entities

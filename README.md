@@ -1,8 +1,8 @@
 # 🩵 CareSync — AI-Coordinated Family Care Network
 
-> **"The AI can coordinate the work. It cannot decide who gets authority to perform consequential actions."**
+> **"CareSync's agent coordinates the workflow and requests a deterministic matching recommendation. A human approves consequential assignments."**
 
-CareSync is a production-grade, event-driven care coordination platform designed to support aging parents, family caregivers, and verified volunteers. Powered by the **AWS Strands Agents SDK (`strands-agents`)**, CareSync transforms fragmented family communication into an intelligent, deterministic, human-in-the-loop care network.
+CareSync is a production-oriented, event-driven care coordination platform designed to support aging parents, family caregivers, and verified volunteers. Powered by the **AWS Strands Agents SDK (`strands-agents`)**, CareSync transforms fragmented family communication into an intelligent, deterministic, human-in-the-loop care network.
 
 ---
 
@@ -108,7 +108,7 @@ flowchart LR
 
 ### Option 1: Single-Command Docker Compose (Recommended)
 
-To run the entire 6-container production stack (Frontend, Backend, PostgreSQL, Redis, Worker, Agent):
+To run the entire 6-container production-oriented stack (Frontend, Backend, PostgreSQL, Redis, Worker, Agent):
 
 ```bash
 docker compose up --build
@@ -151,7 +151,7 @@ npm run dev
 
 ## 🧪 Testing & Verification
 
-### Run Backend Pytest Suite (157+ Tests)
+### Run Backend Pytest Suite (162 Tests)
 
 ```bash
 cd backend
@@ -170,7 +170,7 @@ npm run build   # Compiles Vite production bundle
 
 ## 🔁 Resettable Demo Dataset Endpoint
 
-CareSync includes a deterministic demo reset endpoint for live presentations:
+CareSync includes a deterministic demo reset endpoint for live presentations (controlled by `DEMO_RESET_ENABLED` environment setting):
 
 ```http
 POST /api/v1/demo/reset

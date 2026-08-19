@@ -2,6 +2,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from unittest.mock import patch
 
 from app.main import app
 from app.api.v1.demo import reset_demo_environment
@@ -33,6 +34,22 @@ async def test_demo_reset_endpoint(async_db: AsyncSession):
         http_res = await ac.post("/api/v1/demo/reset")
         assert http_res.status_code == 200
         assert http_res.json()["status"] == "RESET_SUCCESSFUL"
+
+@pytest.mark.asyncio
+async def test_demo_reset_disabled_in_production(async_db: AsyncSession):
+    """
+    Scenario: Client attempts to call POST /api/v1/demo/reset when DEMO_RESET_ENABLED is False.
+    SECURITY INVARIANT: Demo reset MUST return HTTP 403 Forbidden to protect production datasets.
+    """
+    with patch("app.api.v1.demo.settings.DEMO_RESET_ENABLED", False):
+        with pytest.raises(Exception) as exc_info:
+            await reset_demo_environment(async_db)
+        assert "403" in str(exc_info.value) or "disabled in production" in str(exc_info.value)
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            http_res = await ac.post("/api/v1/demo/reset")
+            assert http_res.status_code == 403
+            assert "disabled in production" in http_res.json()["detail"]
 
 @pytest.mark.asyncio
 async def test_strands_sdk_agent_initialization():
