@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import health, auth, parent, family, care_requests, checkins, medications, appointments, agent, trust, decisions
+from app.api.v1 import health, auth, parent, family, care_requests, checkins, medications, appointments, agent, trust, decisions, demo
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(appointments.router, prefix="/appointments", tags=["Ap
 api_router.include_router(agent.router, prefix="/agent", tags=["Quiet Agent Coordination"])
 api_router.include_router(trust.router, prefix="/trust", tags=["Trust & Safety Layer"])
 api_router.include_router(decisions.router, prefix="/decisions", tags=["Decision Inbox"])
+api_router.include_router(demo.router, prefix="/demo", tags=["Demo Controls"])

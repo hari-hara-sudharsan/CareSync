@@ -1,8 +1,16 @@
 import logging
-from typing import Set
+from typing import Set, Tuple
+from enum import Enum
 from app.core.redis import get_redis_client
 
 logger = logging.getLogger(__name__)
+
+
+class RevocationCheckStatus(str, Enum):
+    OK = "REVOCATION_CHECK_OK"
+    REVOKED = "TOKEN_REVOKED"
+    UNAVAILABLE = "REVOCATION_CHECK_UNAVAILABLE"
+
 
 class TokenRevocationService:
     """
@@ -48,5 +56,29 @@ class TokenRevocationService:
             logger.warning(f"Redis revocation check fallback to memory: {exc}")
 
         return False
+
+    async def check_revocation_status(self, jti: str) -> Tuple[RevocationCheckStatus, bool]:
+        """
+        Returns detailed revocation check status and boolean is_revoked.
+        """
+        if not jti:
+            return RevocationCheckStatus.OK, False
+
+        if jti in self._memory_revoked:
+            return RevocationCheckStatus.REVOKED, True
+
+        try:
+            r = get_redis_client()
+            if r is not None:
+                exists = await r.exists(f"caresync:revoked_jti:{jti}")
+                if bool(exists):
+                    return RevocationCheckStatus.REVOKED, True
+                return RevocationCheckStatus.OK, False
+        except Exception as exc:
+            logger.warning(f"Redis revocation status check unavailable, falling back to memory: {exc}")
+            return RevocationCheckStatus.UNAVAILABLE, False
+
+        return RevocationCheckStatus.OK, False
+
 
 token_revocation_service = TokenRevocationService()

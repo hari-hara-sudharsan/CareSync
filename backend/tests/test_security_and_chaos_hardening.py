@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from unittest.mock import patch
@@ -114,7 +114,7 @@ async def test_security_headers_and_csrf_origin_blocking():
     Security Matrix Test: Modern Security Headers & Origin CSRF Protection.
     Verifies response contains security headers and blocks unauthorized cross-origin POSTs.
     """
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         res = await ac.get("/api/v1/health/live")
         assert res.headers.get("X-Content-Type-Options") == "nosniff"
         assert res.headers.get("X-Frame-Options") == "DENY"
