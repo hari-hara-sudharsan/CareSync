@@ -11,16 +11,29 @@ correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", def
 trace_id_var: ContextVar[Optional[str]] = ContextVar("trace_id", default=None)
 
 # List of sensitive keys to redact from logs
-SENSITIVE_KEYS = {"password", "secret", "token", "ssn", "medical_history", "dosage_instructions"}
+SENSITIVE_KEYS = {"password", "secret", "token", "ssn", "medical_history", "dosage_instructions", "context", "payload"}
 
-def sanitize_log_dict(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Redacts sensitive health or credentials keys from dictionary before logging."""
+# Explicit allowlist of allowed log keys for production safety
+ALLOWED_LOG_KEYS = {
+    "timestamp", "level", "service", "logger", "message",
+    "correlation_id", "trace_id", "event", "parent_id",
+    "care_request_id", "agent_id", "actor_id", "user_id", "error_type",
+    "duration_ms", "exception", "status_code", "path", "method"
+}
+
+def sanitize_log_dict(data: Dict[str, Any], use_allowlist: bool = True) -> Dict[str, Any]:
+    """
+    Sanitizes log data dictionary.
+    Enforces blacklist redaction for explicit sensitive keys and filters fields against ALLOWED_LOG_KEYS.
+    """
     sanitized = {}
     for k, v in data.items():
         if k.lower() in SENSITIVE_KEYS:
             sanitized[k] = "[REDACTED]"
+        elif use_allowlist and k not in ALLOWED_LOG_KEYS:
+            sanitized[k] = "[FILTERED]"
         elif isinstance(v, dict):
-            sanitized[k] = sanitize_log_dict(v)
+            sanitized[k] = sanitize_log_dict(v, use_allowlist=use_allowlist)
         else:
             sanitized[k] = v
     return sanitized
@@ -47,25 +60,16 @@ class JSONLogFormatter(logging.Formatter):
         }
 
         # Merge extra attributes if provided
-        if hasattr(record, "event"):
-            log_entry["event"] = record.event
-        if hasattr(record, "parent_id"):
-            log_entry["parent_id"] = record.parent_id
-        if hasattr(record, "care_request_id"):
-            log_entry["care_request_id"] = record.care_request_id
-        if hasattr(record, "agent_id"):
-            log_entry["agent_id"] = record.agent_id
-        if hasattr(record, "duration_ms"):
-            log_entry["duration_ms"] = record.duration_ms
-        if hasattr(record, "error_type"):
-            log_entry["error_type"] = record.error_type
+        for attr in ["event", "parent_id", "care_request_id", "agent_id", "actor_id", "user_id", "duration_ms", "error_type"]:
+            if hasattr(record, attr):
+                log_entry[attr] = getattr(record, attr)
 
         # Include exception info if present
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)
 
         try:
-            sanitized_entry = sanitize_log_dict(log_entry)
+            sanitized_entry = sanitize_log_dict(log_entry, use_allowlist=True)
             return json.dumps(sanitized_entry)
         except Exception:
             # Fallback to plain string formatting if JSON serialization fails

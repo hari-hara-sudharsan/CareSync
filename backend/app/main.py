@@ -8,6 +8,8 @@ from app.core.database import engine, Base
 from app.core.logging import setup_json_logging
 from app.core.middleware import CorrelationIdMiddleware
 from app.core.observability import StructuredTracingMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.rate_limit import RateLimitMiddleware
 from app.api.v1.api import api_router
 
 setup_json_logging(service_name="care-api", log_level=logging.INFO)
@@ -29,7 +31,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add Correlation & Tracing Middlewares
+# Add Security, Rate Limit, Correlation & Tracing Middlewares
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware, limit_per_minute=200)
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(StructuredTracingMiddleware)
 
