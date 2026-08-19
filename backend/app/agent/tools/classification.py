@@ -8,6 +8,8 @@ class ToolRiskLevel(str, Enum):
     FORBIDDEN = "FORBIDDEN"            # Strictly prohibited for AI execution
 
 FORBIDDEN_AGENT_ACTIONS: Set[str] = {
+    "direct_sql_mutation",
+    "execute_raw_sql",
     "assign_volunteer",
     "change_medication_dosage",
     "prescribe_medication",
@@ -19,6 +21,7 @@ FORBIDDEN_AGENT_ACTIONS: Set[str] = {
     "bypass_authorization",
     "modify_trust_score",
     "close_high_severity_case",
+    "auto_confirm_completion",
 }
 
 class ToolClassifier:
@@ -26,7 +29,8 @@ class ToolClassifier:
     CareSync Tool Classification Guard.
     
     Prevents the agent from invoking high-risk or prohibited operations.
-    Enforces the core rule: LLM reasoning != business authority.
+    Enforces the core invariant: LLM reasoning != business authority.
+    The Agent is intelligence. The FastAPI domain is authority. PostgreSQL is the source of truth.
     """
 
     @staticmethod
