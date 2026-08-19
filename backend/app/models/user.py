@@ -12,3 +12,4 @@ class User(BaseModel):
     role: Mapped[str] = mapped_column(String(64), default="FAMILY", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)

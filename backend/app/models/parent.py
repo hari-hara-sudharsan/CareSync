@@ -13,3 +13,4 @@ class ParentProfile(BaseModel):
     care_situation: Mapped[str] = mapped_column(String(128), default="INDEPENDENT")
     home_address: Mapped[str] = mapped_column(String(255), nullable=True)
     care_status: Mapped[str] = mapped_column(String(32), default="ALL_CLEAR")
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)

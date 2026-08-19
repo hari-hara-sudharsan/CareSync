@@ -1,3 +1,5 @@
+import sys
+import os
 import asyncio
 from logging.config import fileConfig
 from sqlalchemy import pool
@@ -5,9 +7,12 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
+# Ensure backend directory is in sys.path for app module imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from app.core.config import settings
 from app.core.database import Base
-import app.models  # Import all models to register metadata
+import app.models  # Register all ORM models with Base.metadata
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
