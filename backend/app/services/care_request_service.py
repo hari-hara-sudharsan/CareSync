@@ -10,10 +10,11 @@ from app.models.idempotency import IdempotencyRecord
 from app.models.user import User
 from app.services.care_request_state_machine import CareRequestStateMachine, CareRequestStatus
 from app.services.matching_engine.filters import HardConstraintFilter
+from app.services.outbox_service import OutboxService
 
 class CareRequestService:
     """
-    Transactional domain service managing Care Requests, Assignments, Execution Lifecycles, Parent Confirmation, Failure Recovery, Audit Trails, and Idempotency.
+    Transactional domain service managing Care Requests, Assignments, Execution Lifecycles, Parent Confirmation, Failure Recovery, Audit Trails, Transactional Outbox Events, and Idempotency.
     """
 
     @staticmethod
@@ -117,6 +118,7 @@ class CareRequestService:
         location_name: Optional[str] = None,
         address: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        correlation_id: Optional[str] = None,
     ) -> CareRequest:
         cached = await CareRequestService.check_idempotency(db, idempotency_key, user_id, "create_request")
         if cached:
@@ -145,6 +147,26 @@ class CareRequestService:
             details={"category": category, "priority": priority},
         )
         db.add(audit)
+
+        # Atomic Outbox Event Insertion (Same Transaction)
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_CREATED",
+            payload={
+                "care_request_id": req.id,
+                "parent_id": parent_id,
+                "category": category,
+                "title": title,
+                "priority": priority,
+                "requested_time": requested_time,
+                "status": req.status,
+            },
+            parent_id=parent_id,
+            correlation_id=correlation_id,
+        )
+
         await db.commit()
         await db.refresh(req)
 
@@ -161,6 +183,7 @@ class CareRequestService:
         actor_name: str,
         candidate_dto: Optional[Dict[str, Any]] = None,
         idempotency_key: Optional[str] = None,
+        correlation_id: Optional[str] = None,
     ) -> CareRequest:
         if idempotency_key:
             res_idemp = await db.execute(
@@ -226,6 +249,24 @@ class CareRequestService:
         )
         db.add(audit)
 
+        # Atomic Outbox Event Insertion (Same Transaction)
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_ASSIGNED",
+            payload={
+                "care_request_id": req.id,
+                "parent_id": req.parent_id,
+                "assigned_to_id": assignee_id,
+                "assigned_to_name": assignee_name,
+                "assigned_to_role": assignee_role,
+                "status": req.status,
+            },
+            parent_id=req.parent_id,
+            correlation_id=correlation_id,
+        )
+
         if idempotency_key:
             response_payload = {
                 "id": req.id,
@@ -287,6 +328,21 @@ class CareRequestService:
         )
         db.add(audit)
 
+        # Atomic Outbox Event Insertion (Same Transaction)
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_ACCEPTED",
+            payload={
+                "care_request_id": req.id,
+                "parent_id": req.parent_id,
+                "assigned_to_id": req.assigned_to_id,
+                "status": req.status,
+            },
+            parent_id=req.parent_id,
+        )
+
         if idempotency_key:
             await CareRequestService.record_idempotency(
                 db, idempotency_key, current_user.id, f"accept_{request_id}", 200, {"id": req.id, "status": req.status}
@@ -340,6 +396,21 @@ class CareRequestService:
             details={"assigned_to_id": req.assigned_to_id},
         )
         db.add(audit)
+
+        # Atomic Outbox Event Insertion (Same Transaction)
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_STARTED",
+            payload={
+                "care_request_id": req.id,
+                "parent_id": req.parent_id,
+                "assigned_to_id": req.assigned_to_id,
+                "status": req.status,
+            },
+            parent_id=req.parent_id,
+        )
 
         if idempotency_key:
             await CareRequestService.record_idempotency(
@@ -397,6 +468,22 @@ class CareRequestService:
         )
         db.add(audit)
 
+        # Atomic Outbox Event Insertion (Same Transaction)
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_COMPLETED",
+            payload={
+                "care_request_id": req.id,
+                "parent_id": req.parent_id,
+                "assigned_to_id": req.assigned_to_id,
+                "status": req.status,
+                "completion_note": completion_note,
+            },
+            parent_id=req.parent_id,
+        )
+
         if idempotency_key:
             await CareRequestService.record_idempotency(
                 db, idempotency_key, current_user.id, f"complete_{request_id}", 200, {"id": req.id, "status": req.status}
@@ -451,6 +538,16 @@ class CareRequestService:
         )
         db.add(audit_confirmed)
 
+        # Atomic Outbox Event Insertion (Same Transaction)
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_PARENT_CONFIRMED",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "status": "PARENT_CONFIRMED"},
+            parent_id=req.parent_id,
+        )
+
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.CLOSED.value)
         req.status = CareRequestStatus.CLOSED.value
 
@@ -473,6 +570,16 @@ class CareRequestService:
         )
         db.add(audit_closed)
 
+        # Atomic Outbox Event Insertion (Same Transaction)
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_CLOSED",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "status": "CLOSED"},
+            parent_id=req.parent_id,
+        )
+
         if idempotency_key:
             await CareRequestService.record_idempotency(
                 db, idempotency_key, current_user.id, f"confirm_{request_id}", 200, {"id": req.id, "status": req.status}
@@ -490,11 +597,6 @@ class CareRequestService:
         reason: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> CareRequest:
-        """
-        Decline Assigned Care Request.
-        Transitions state ASSIGNED -> DECLINED -> PENDING_ASSIGNMENT.
-        Clears assignee metadata and returns task to pending matching pool without auto-assigning.
-        """
         if idempotency_key:
             cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"decline_{request_id}")
             if cached:
@@ -516,7 +618,6 @@ class CareRequestService:
         old_assignee_name = req.assigned_to_name or current_user.full_name
         old_assignee_role = req.assigned_to_role or current_user.role
 
-        # Transition ASSIGNED -> DECLINED -> PENDING_ASSIGNMENT
         req.status = CareRequestStatus.DECLINED.value
         history_declined = AssignmentHistory(
             care_request_id=req.id,
@@ -538,7 +639,16 @@ class CareRequestService:
         )
         db.add(audit_declined)
 
-        # Unassign & return to PENDING_ASSIGNMENT pool for human re-matching
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_DECLINED",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "previous_assignee_id": old_assignee_id, "reason": reason},
+            parent_id=req.parent_id,
+        )
+
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.PENDING_ASSIGNMENT.value)
         req.status = CareRequestStatus.PENDING_ASSIGNMENT.value
         req.assigned_to_id = None
@@ -563,10 +673,6 @@ class CareRequestService:
         details: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> CareRequest:
-        """
-        Report Execution Failure during Task Execution.
-        Transitions state IN_PROGRESS -> FAILED -> ESCALATED and creates DecisionCard in Decision Inbox.
-        """
         if idempotency_key:
             cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"fail_{request_id}")
             if cached:
@@ -605,11 +711,19 @@ class CareRequestService:
         )
         db.add(audit_failed)
 
-        # Transition FAILED -> ESCALATED
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_FAILED",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "failure_reason": failure_reason, "details": details},
+            parent_id=req.parent_id,
+        )
+
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ESCALATED.value)
         req.status = CareRequestStatus.ESCALATED.value
 
-        # Create DecisionCard in Decision Inbox for human decision
         card = DecisionCard(
             parent_id=req.parent_id,
             related_entity_id=req.id,
@@ -636,6 +750,16 @@ class CareRequestService:
         )
         db.add(audit_escalated)
 
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_ESCALATED",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "escalation_type": "TASK_FAILURE", "decision_card_id": card.id},
+            parent_id=req.parent_id,
+        )
+
         if idempotency_key:
             await CareRequestService.record_idempotency(
                 db, idempotency_key, current_user.id, f"fail_{request_id}", 200, {"id": req.id, "status": req.status}
@@ -653,10 +777,6 @@ class CareRequestService:
         actor_name: str = "System Timeout Worker",
         idempotency_key: Optional[str] = None,
     ) -> CareRequest:
-        """
-        Deterministic Assignment / Execution Timeout Handler.
-        Transitions state ASSIGNED / ACCEPTED -> TIMEOUT -> ESCALATED and creates DecisionCard.
-        """
         if idempotency_key:
             cached = await CareRequestService.check_idempotency(db, idempotency_key, actor_id, f"timeout_{request_id}")
             if cached:
@@ -694,7 +814,16 @@ class CareRequestService:
         )
         db.add(audit_timeout)
 
-        # Transition TIMEOUT -> ESCALATED
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_TIMEOUT",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "previous_assignee_id": req.assigned_to_id},
+            parent_id=req.parent_id,
+        )
+
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ESCALATED.value)
         req.status = CareRequestStatus.ESCALATED.value
 
@@ -723,6 +852,16 @@ class CareRequestService:
         )
         db.add(audit_escalated)
 
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_ESCALATED",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "escalation_type": "TIMEOUT", "decision_card_id": card.id},
+            parent_id=req.parent_id,
+        )
+
         if idempotency_key:
             await CareRequestService.record_idempotency(
                 db, idempotency_key, actor_id, f"timeout_{request_id}", 200, {"id": req.id, "status": req.status}
@@ -740,11 +879,6 @@ class CareRequestService:
         cancellation_reason: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> CareRequest:
-        """
-        Cancel Care Request (Parent / Guardian Policy).
-        Transitions active state -> CANCELLED.
-        Rejects cancellation of COMPLETED or CLOSED tasks.
-        """
         if idempotency_key:
             cached = await CareRequestService.check_idempotency(db, idempotency_key, current_user.id, f"cancel_{request_id}")
             if cached:
@@ -784,6 +918,16 @@ class CareRequestService:
             details={"previous_status": old_status, "reason": cancellation_reason},
         )
         db.add(audit_cancelled)
+
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_CANCELLED",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "previous_status": old_status, "reason": cancellation_reason},
+            parent_id=req.parent_id,
+        )
 
         if idempotency_key:
             await CareRequestService.record_idempotency(
@@ -839,6 +983,16 @@ class CareRequestService:
             },
         )
         db.add(audit)
+
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type="CARE_REQUEST_CONCERN_RAISED",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "concern_category": category, "details": details},
+            parent_id=req.parent_id,
+        )
 
         response_body = {
             "success": True,
@@ -898,6 +1052,16 @@ class CareRequestService:
             details={"old_status": old_status, "new_status": target_status, "reason": reason},
         )
         db.add(audit)
+
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CareRequest",
+            aggregate_id=req.id,
+            event_type=f"CARE_REQUEST_{target_status}",
+            payload={"care_request_id": req.id, "parent_id": req.parent_id, "old_status": old_status, "new_status": target_status, "reason": reason},
+            parent_id=req.parent_id,
+        )
 
         await db.commit()
         await db.refresh(req)

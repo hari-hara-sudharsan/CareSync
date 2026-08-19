@@ -10,6 +10,7 @@ from app.models.idempotency import IdempotencyRecord
 from app.models.user import User
 from app.api.deps import verify_parent_authorization
 from app.core.authorization import CarePermission
+from app.services.outbox_service import OutboxService
 
 class DecisionService:
     """
@@ -19,6 +20,7 @@ class DecisionService:
     2. Validates DecisionCard status and associated CareRequest state.
     3. Handles idempotent decision resolutions.
     4. Logs immutable AuditEvents for human choices.
+    5. Writes atomic OutboxEvents in same database transaction.
     """
 
     @staticmethod
@@ -116,6 +118,23 @@ class DecisionService:
             },
         )
         db.add(audit)
+
+        # Atomic Outbox Event Insertion
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="DecisionCard",
+            aggregate_id=card.id,
+            event_type="DECISION_RESOLVED",
+            payload={
+                "card_id": card.id,
+                "parent_id": card.parent_id,
+                "action_key": action_key,
+                "reason": reason,
+                "related_entity_id": card.related_entity_id,
+            },
+            parent_id=card.parent_id,
+            correlation_id=card.id,
+        )
 
         response_body = {
             "success": True,

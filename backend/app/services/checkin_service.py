@@ -12,6 +12,7 @@ from app.models.idempotency import IdempotencyRecord
 from app.models.user import User
 from app.api.deps import verify_parent_authorization
 from app.core.authorization import CarePermission
+from app.services.outbox_service import OutboxService
 
 class CheckInService:
     """
@@ -19,8 +20,8 @@ class CheckInService:
     
     1. Enforces parent authorization.
     2. Idempotency deduplication via IdempotencyRecord header/key.
-    3. 'WELL' branch -> Persists CheckInEvent only.
-    4. 'NEED_HELP' branch -> Persists CheckInEvent AND creates a real CareRequest.
+    3. 'WELL' branch -> Persists CheckInEvent & OutboxEvent.
+    4. 'NEED_HELP' branch -> Persists CheckInEvent AND creates a real CareRequest & OutboxEvents.
     """
 
     @staticmethod
@@ -121,6 +122,25 @@ class CheckInService:
                 "title": req.title,
             }
 
+            # Outbox Event for CareRequest created from Check-In
+            OutboxService.create_outbox_event(
+                db=db,
+                aggregate_type="CareRequest",
+                aggregate_id=req.id,
+                event_type="CARE_REQUEST_CREATED",
+                payload={
+                    "care_request_id": req.id,
+                    "parent_id": parent_id,
+                    "category": category,
+                    "title": req.title,
+                    "priority": priority,
+                    "status": req.status,
+                    "source": "CHECKIN_ESCALATION",
+                },
+                parent_id=parent_id,
+                correlation_id=checkin_event.id,
+            )
+
         # Audit Event
         audit = AuditEvent(
             actor_id=current_user.id,
@@ -135,6 +155,24 @@ class CheckInService:
             },
         )
         db.add(audit)
+
+        # Atomic Outbox Event for CheckInEvent
+        OutboxService.create_outbox_event(
+            db=db,
+            aggregate_type="CheckInEvent",
+            aggregate_id=checkin_event.id,
+            event_type="CHECK_IN_SUBMITTED",
+            payload={
+                "checkin_id": checkin_event.id,
+                "parent_id": parent_id,
+                "feeling_branch": feeling_branch,
+                "status_summary": status_summary,
+                "requires_escalation": requires_escalation,
+                "care_request_id": care_request_id,
+            },
+            parent_id=parent_id,
+            correlation_id=checkin_event.id,
+        )
 
         response_body = {
             "success": True,
