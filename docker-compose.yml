@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  caresync-postgres:
+    image: postgres:16-alpine
+    container_name: caresync-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword2026}
+      POSTGRES_DB: ${POSTGRES_DB:-caresync_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d caresync_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  caresync-redis:
+    image: redis:7-alpine
+    container_name: caresync-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  caresync-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: caresync-backend
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword2026}@caresync-postgres:5432/${POSTGRES_DB:-caresync_db}
+      - REDIS_URL=redis://caresync-redis:6379/0
+      - JWT_SECRET=${JWT_SECRET:-caresync-secret-key-change-in-production-2026}
+    ports:
+      - "8000:8000"
+    depends_on:
+      caresync-postgres:
+        condition: service_healthy
+      caresync-redis:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/liveness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  caresync-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: caresync-worker
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword2026}@caresync-postgres:5432/${POSTGRES_DB:-caresync_db}
+      - REDIS_URL=redis://caresync-redis:6379/0
+      - WORKER_POLL_INTERVAL_SECONDS=2
+      - AGENT_ENABLED=true
+    depends_on:
+      caresync-postgres:
+        condition: service_healthy
+      caresync-redis:
+        condition: service_healthy
+      caresync-backend:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker"]
+
+  caresync-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: caresync-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - caresync-backend
+
+volumes:
+  postgres_data:
+  redis_data:
