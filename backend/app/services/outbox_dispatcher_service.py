@@ -3,9 +3,10 @@ from datetime import datetime, timezone
 from typing import List, Optional, Protocol, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from app.models.outbox import OutboxEvent, ProcessedEvent
+from app.services.event_transport_service import RedisEventTransport
+from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +17,15 @@ class EventConsumerInterface(Protocol):
 
 class LoggingEventConsumer:
     """
-    Default Logging & Audit Event Consumer.
-    Processes OutboxEvents idempotently by recording ProcessedEvent records in the database.
+    Default Logging, Redis Transport & Notification Consumer.
+    Processes OutboxEvents idempotently by recording ProcessedEvent records in the database,
+    fanning out transient events over RedisEventTransport, and triggering NotificationService safely.
     """
     consumer_name: str = "LoggingEventConsumer"
+
+    def __init__(self):
+        self.redis_transport = RedisEventTransport()
+        self.notification_service = NotificationService()
 
     async def handle_event(self, event: OutboxEvent, db: AsyncSession) -> bool:
         # Idempotency check: verify if already processed by this consumer
@@ -38,6 +44,18 @@ class LoggingEventConsumer:
             f"[{self.consumer_name}] Processed Event '{event.event_type}' "
             f"(ID: {event.id}, Aggregate: {event.aggregate_type}/{event.aggregate_id})"
         )
+
+        # Transient Redis fan-out (graceful degradation if Redis is down)
+        try:
+            await self.redis_transport.publish(event)
+        except Exception as exc:
+            logger.warning(f"[{self.consumer_name}] Redis fan-out error for event '{event.id}': {exc}. Continuing outbox dispatch.")
+
+        # Trigger notification intent (isolated from domain transaction)
+        try:
+            await self.notification_service.notify_from_outbox_event(db, event)
+        except Exception as exc:
+            logger.warning(f"[{self.consumer_name}] Notification error for event '{event.id}': {exc}. Continuing outbox dispatch.")
 
         # Record idempotent completion
         proc = ProcessedEvent(

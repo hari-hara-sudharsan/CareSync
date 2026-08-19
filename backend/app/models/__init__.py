@@ -9,6 +9,7 @@ from app.models.checkin import CheckInEvent
 from app.models.decision import DecisionCard, AuditEvent
 from app.models.idempotency import IdempotencyRecord
 from app.models.outbox import OutboxEvent, ProcessedEvent
+from app.models.notification import NotificationRecord
 from app.trust.models import VerificationRecord, TaskReliability, TrustEvent, Complaint
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "IdempotencyRecord",
     "OutboxEvent",
     "ProcessedEvent",
+    "NotificationRecord",
     "VerificationRecord",
     "TaskReliability",
     "TrustEvent",
