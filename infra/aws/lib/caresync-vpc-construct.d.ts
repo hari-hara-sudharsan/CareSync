@@ -10,5 +10,6 @@ export declare class CareSyncVpcConstruct extends Construct {
     readonly ecsSecurityGroup: ec2.SecurityGroup;
     readonly dbSecurityGroup: ec2.SecurityGroup;
     readonly redisSecurityGroup: ec2.SecurityGroup;
+    readonly vpcEndpointsSecurityGroup: ec2.SecurityGroup;
     constructor(scope: Construct, id: string, props: CareSyncVpcConstructProps);
 }

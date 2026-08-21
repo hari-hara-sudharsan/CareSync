@@ -18,6 +18,8 @@ export declare class CareSyncEcsConstruct extends Construct {
     readonly listener: elbv2.ApplicationListener;
     readonly targetGroup: elbv2.ApplicationTargetGroup;
     readonly fargateService: ecs.FargateService;
+    readonly workerFargateService: ecs.FargateService;
     readonly logGroup: logs.LogGroup;
+    readonly workerLogGroup: logs.LogGroup;
     constructor(scope: Construct, id: string, props: CareSyncEcsConstructProps);
 }

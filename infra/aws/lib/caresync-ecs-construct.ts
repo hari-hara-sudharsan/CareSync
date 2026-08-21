@@ -23,7 +23,9 @@ export class CareSyncEcsConstruct extends Construct {
   public readonly listener: elbv2.ApplicationListener;
   public readonly targetGroup: elbv2.ApplicationTargetGroup;
   public readonly fargateService: ecs.FargateService;
+  public readonly workerFargateService: ecs.FargateService;
   public readonly logGroup: logs.LogGroup;
+  public readonly workerLogGroup: logs.LogGroup;
 
   constructor(scope: Construct, id: string, props: CareSyncEcsConstructProps) {
     super(scope, id);
@@ -31,9 +33,15 @@ export class CareSyncEcsConstruct extends Construct {
     const { config, vpcConstruct, rdsConstruct, redisConstruct } = props;
     const prefix = `${config.projectName}-${config.environment}`;
 
-    // 1. CloudWatch Log Group for ECS Task Logs
+    // 1. CloudWatch Log Group for ECS API & Worker Task Logs
     this.logGroup = new logs.LogGroup(this, 'EcsLogGroup', {
       logGroupName: `/aws/ecs/${prefix}-api`,
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    this.workerLogGroup = new logs.LogGroup(this, 'WorkerLogGroup', {
+      logGroupName: `/aws/ecs/${prefix}-worker`,
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
@@ -45,7 +53,7 @@ export class CareSyncEcsConstruct extends Construct {
       containerInsights: false, // Disabled for cost optimization
     });
 
-    // 3. IAM Execution Role & Task Role
+    // 3. IAM Execution Role & Task Role (Least-Privilege Authorization)
     const taskExecutionRole = new iam.Role(this, 'EcsTaskExecutionRole', {
       roleName: `${prefix}-ecs-execution-role`,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
@@ -62,7 +70,12 @@ export class CareSyncEcsConstruct extends Construct {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
 
-    // 4. Cost-Conscious Fargate Task Definition (0.25 vCPU / 512 MB RAM)
+    const workerTaskRole = new iam.Role(this, 'WorkerTaskRole', {
+      roleName: `${prefix}-worker-task-role`,
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+    });
+
+    // 4. Cost-Conscious Fargate Task Definitions (0.25 vCPU / 512 MB RAM)
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'FargateTaskDef', {
       cpu: 256, // 0.25 vCPU
       memoryLimitMiB: 512, // 512 MB RAM
@@ -70,7 +83,14 @@ export class CareSyncEcsConstruct extends Construct {
       taskRole: taskRole,
     });
 
-    // 5. Container Specification (CareSync FastAPI Backend & Worker)
+    const workerTaskDefinition = new ecs.FargateTaskDefinition(this, 'WorkerTaskDef', {
+      cpu: 256, // 0.25 vCPU
+      memoryLimitMiB: 512, // 512 MB RAM
+      executionRole: taskExecutionRole,
+      taskRole: workerTaskRole,
+    });
+
+    // 5. Container Specification (CareSync FastAPI Backend)
     const container = taskDefinition.addContainer('CareSyncApiContainer', {
       image: ecs.ContainerImage.fromRegistry('public.ecr.aws/nginx/nginx:latest'), // Placeholder demonstration container image
       logging: ecs.LogDrivers.awsLogs({
@@ -94,6 +114,28 @@ export class CareSyncEcsConstruct extends Construct {
     container.addPortMappings({
       containerPort: 8000,
       protocol: ecs.Protocol.TCP,
+    });
+
+    // Container Specification (CareSync Outbox Worker)
+    workerTaskDefinition.addContainer('CareSyncWorkerContainer', {
+      image: ecs.ContainerImage.fromRegistry('public.ecr.aws/nginx/nginx:latest'),
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: 'caresync-worker',
+        logGroup: this.workerLogGroup,
+      }),
+      environment: {
+        ENVIRONMENT: config.environment,
+        PROJECT_NAME: config.projectName,
+        POSTGRES_DB: 'caresync_db',
+        POSTGRES_HOST: rdsConstruct.databaseInstance.dbInstanceEndpointAddress,
+        POSTGRES_PORT: '5432',
+        REDIS_HOST: redisConstruct.redisCluster.attrRedisEndpointAddress,
+        REDIS_PORT: '6379',
+        WORKER_MODE: 'outbox_processor',
+      },
+      secrets: {
+        POSTGRES_PASSWORD: ecs.Secret.fromSecretsManager(rdsConstruct.dbSecret, 'password'),
+      },
     });
 
     // 6. Application Load Balancer (Public Subnets)
@@ -130,7 +172,7 @@ export class CareSyncEcsConstruct extends Construct {
       defaultTargetGroups: [this.targetGroup],
     });
 
-    // 9. Fargate Service (Tasks run with security group isolation)
+    // 9. API Fargate Service (Targeted by ALB)
     this.fargateService = new ecs.FargateService(this, 'FargateService', {
       serviceName: `${prefix}-api-service`,
       cluster: this.cluster,
@@ -145,7 +187,20 @@ export class CareSyncEcsConstruct extends Construct {
 
     this.targetGroup.addTarget(this.fargateService);
 
-    // CfnOutputs for ALB Metadata
+    // 10. Outbox Worker Fargate Service (NO ALB Target Group, NO Public Inbound Access)
+    this.workerFargateService = new ecs.FargateService(this, 'WorkerFargateService', {
+      serviceName: `${prefix}-worker-service`,
+      cluster: this.cluster,
+      taskDefinition: workerTaskDefinition,
+      desiredCount: 1,
+      securityGroups: [vpcConstruct.ecsSecurityGroup],
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED, // Private isolated subnets for worker
+      },
+      assignPublicIp: false, // Strictly non-public
+    });
+
+    // CfnOutputs for ALB & ECS Metadata
     new cdk.CfnOutput(this, 'AlbDnsName', {
       value: this.alb.loadBalancerDnsName,
       description: 'CareSync Application Load Balancer Public DNS Name',
@@ -161,9 +216,14 @@ export class CareSyncEcsConstruct extends Construct {
       description: 'CareSync ECS Cluster Name',
     });
 
-    new cdk.CfnOutput(this, 'EcsServiceName', {
+    new cdk.CfnOutput(this, 'EcsApiService', {
       value: this.fargateService.serviceName,
-      description: 'CareSync Fargate Service Name',
+      description: 'CareSync API Fargate Service Name',
+    });
+
+    new cdk.CfnOutput(this, 'EcsWorkerService', {
+      value: this.workerFargateService.serviceName,
+      description: 'CareSync Private Outbox Worker Fargate Service Name',
     });
   }
 }

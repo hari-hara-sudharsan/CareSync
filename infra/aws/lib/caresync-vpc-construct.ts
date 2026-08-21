@@ -13,6 +13,7 @@ export class CareSyncVpcConstruct extends Construct {
   public readonly ecsSecurityGroup: ec2.SecurityGroup;
   public readonly dbSecurityGroup: ec2.SecurityGroup;
   public readonly redisSecurityGroup: ec2.SecurityGroup;
+  public readonly vpcEndpointsSecurityGroup: ec2.SecurityGroup;
 
   constructor(scope: Construct, id: string, props: CareSyncVpcConstructProps) {
     super(scope, id);
@@ -69,7 +70,7 @@ export class CareSyncVpcConstruct extends Construct {
       'Allow HTTPS from Internet'
     );
 
-    // ECS Security Group: Inbound Port 8000 from ALB, Outbound to DB & Redis
+    // ECS Security Group: Inbound Port 8000 from ALB, Outbound to DB, Redis, and VPC Endpoints
     this.ecsSecurityGroup = new ec2.SecurityGroup(this, 'EcsSecurityGroup', {
       vpc: this.vpc,
       securityGroupName: `${prefix}-ecs-sg`,
@@ -125,6 +126,53 @@ export class CareSyncVpcConstruct extends Construct {
       'Allow ECS Task egress to Redis on Port 6379'
     );
 
+    // VPC Endpoints Security Group (Inbound HTTPS 443 strictly from ECS Tasks)
+    this.vpcEndpointsSecurityGroup = new ec2.SecurityGroup(this, 'VpcEndpointsSecurityGroup', {
+      vpc: this.vpc,
+      securityGroupName: `${prefix}-vpce-sg`,
+      description: 'CareSync Private VPC Endpoints Security Group',
+      allowAllOutbound: false,
+    });
+    this.vpcEndpointsSecurityGroup.addIngressRule(
+      this.ecsSecurityGroup,
+      ec2.Port.tcp(443),
+      'Allow HTTPS 443 strictly from ECS Tasks for AWS API Endpoints'
+    );
+    this.ecsSecurityGroup.addEgressRule(
+      this.vpcEndpointsSecurityGroup,
+      ec2.Port.tcp(443),
+      'Allow ECS Task egress to VPC Interface Endpoints on Port 443'
+    );
+
+    // 4. VPC Interface Endpoints (No-NAT Private ECS AWS Service Connectivity)
+    // ECR API Interface Endpoint
+    this.vpc.addInterfaceEndpoint('EcrApiEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR,
+      securityGroups: [this.vpcEndpointsSecurityGroup],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+
+    // ECR Docker Registry Interface Endpoint
+    this.vpc.addInterfaceEndpoint('EcrDockerEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
+      securityGroups: [this.vpcEndpointsSecurityGroup],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+
+    // CloudWatch Logs Interface Endpoint
+    this.vpc.addInterfaceEndpoint('CloudWatchLogsEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+      securityGroups: [this.vpcEndpointsSecurityGroup],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+
+    // Secrets Manager Interface Endpoint
+    this.vpc.addInterfaceEndpoint('SecretsManagerEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
+      securityGroups: [this.vpcEndpointsSecurityGroup],
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+    });
+
     // Stack CfnOutputs for Network Verification
     new cdk.CfnOutput(this, 'VpcId', {
       value: this.vpc.vpcId,
@@ -145,6 +193,10 @@ export class CareSyncVpcConstruct extends Construct {
     new cdk.CfnOutput(this, 'RedisSecurityGroupId', {
       value: this.redisSecurityGroup.securityGroupId,
       description: 'CareSync Redis Security Group ID',
+    });
+    new cdk.CfnOutput(this, 'VpcEndpointsSecurityGroupId', {
+      value: this.vpcEndpointsSecurityGroup.securityGroupId,
+      description: 'CareSync VPC Endpoints Security Group ID',
     });
   }
 }
