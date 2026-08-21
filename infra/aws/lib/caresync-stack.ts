@@ -1,12 +1,15 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { EnvironmentConfig, applyStandardTags } from '../config/environments';
+import { CareSyncVpcConstruct } from './caresync-vpc-construct';
 
 export interface CareSyncStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
 }
 
 export class CareSyncStack extends cdk.Stack {
+  public readonly vpcConstruct: CareSyncVpcConstruct;
+
   constructor(scope: Construct, id: string, props: CareSyncStackProps) {
     super(scope, id, props);
 
@@ -36,18 +39,9 @@ export class CareSyncStack extends cdk.Stack {
       description: 'Target Cost Alert Ceiling (USD 20)',
     });
 
-    /*
-     * PHASE 12A ARCHITECTURAL GUARDRAIL NOTICE:
-     * 
-     * In Phase 12A, NO runtime application resources (VPC, RDS PostgreSQL,
-     * ElastiCache Redis, ECS Cluster, ALB, NAT Gateway, Bedrock workloads)
-     * are created.
-     * 
-     * Infrastructure resources will be provisioned in subsequent approved sub-phases:
-     * - Phase 12B: VPC & Networking (VPC without NAT Gateway)
-     * - Phase 12C: PostgreSQL Persistence (RDS / Containerized DB)
-     * - Phase 12D: Redis Transport & Background Worker
-     * - Phase 12E: FastAPI Application & Frontend Container Deployment
-     */
+    // Instantiate Phase 12B Network & Subnet Construct
+    this.vpcConstruct = new CareSyncVpcConstruct(this, 'VpcConstruct', {
+      config,
+    });
   }
 }
