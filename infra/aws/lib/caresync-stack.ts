@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { EnvironmentConfig, applyStandardTags } from '../config/environments';
 import { CareSyncVpcConstruct } from './caresync-vpc-construct';
+import { CareSyncRdsConstruct } from './caresync-rds-construct';
 
 export interface CareSyncStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
@@ -9,6 +10,7 @@ export interface CareSyncStackProps extends cdk.StackProps {
 
 export class CareSyncStack extends cdk.Stack {
   public readonly vpcConstruct: CareSyncVpcConstruct;
+  public readonly rdsConstruct: CareSyncRdsConstruct;
 
   constructor(scope: Construct, id: string, props: CareSyncStackProps) {
     super(scope, id, props);
@@ -42,6 +44,12 @@ export class CareSyncStack extends cdk.Stack {
     // Instantiate Phase 12B Network & Subnet Construct
     this.vpcConstruct = new CareSyncVpcConstruct(this, 'VpcConstruct', {
       config,
+    });
+
+    // Instantiate Phase 12C RDS PostgreSQL Construct
+    this.rdsConstruct = new CareSyncRdsConstruct(this, 'RdsConstruct', {
+      config,
+      vpcConstruct: this.vpcConstruct,
     });
   }
 }
