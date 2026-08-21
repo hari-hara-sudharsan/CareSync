@@ -3,6 +3,7 @@ import { Construct } from 'constructs';
 import { EnvironmentConfig, applyStandardTags } from '../config/environments';
 import { CareSyncVpcConstruct } from './caresync-vpc-construct';
 import { CareSyncRdsConstruct } from './caresync-rds-construct';
+import { CareSyncRedisConstruct } from './caresync-redis-construct';
 
 export interface CareSyncStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
@@ -11,6 +12,7 @@ export interface CareSyncStackProps extends cdk.StackProps {
 export class CareSyncStack extends cdk.Stack {
   public readonly vpcConstruct: CareSyncVpcConstruct;
   public readonly rdsConstruct: CareSyncRdsConstruct;
+  public readonly redisConstruct: CareSyncRedisConstruct;
 
   constructor(scope: Construct, id: string, props: CareSyncStackProps) {
     super(scope, id, props);
@@ -48,6 +50,12 @@ export class CareSyncStack extends cdk.Stack {
 
     // Instantiate Phase 12C RDS PostgreSQL Construct
     this.rdsConstruct = new CareSyncRdsConstruct(this, 'RdsConstruct', {
+      config,
+      vpcConstruct: this.vpcConstruct,
+    });
+
+    // Instantiate Phase 12D ElastiCache Redis Construct
+    this.redisConstruct = new CareSyncRedisConstruct(this, 'RedisConstruct', {
       config,
       vpcConstruct: this.vpcConstruct,
     });

@@ -20,7 +20,7 @@ Phase 12C provisions the PostgreSQL persistence infrastructure for CareSync in A
 | :--- | :--- | :--- |
 | **RDS Instance Identifier** | `caresync-demo-db` | Single instance for hackathon presentation baseline |
 | **Engine & Version** | `PostgreSQL 16.1` | Matches CareSync Phase 10-11 persistence baseline |
-| **Instance Type** | `db.t4g.micro` | Cost-conscious single-AZ compute ($0.016/hr) |
+| **Instance Type** | `db.t4g.micro` | Cost-conscious single-AZ compute |
 | **Storage Class & Size** | `20 GB gp3` | Storage encrypted (`storageEncrypted: true`) |
 | **Max Allocated Storage** | `20 GB` | Fixed ceiling to prevent auto-scaling cost runaway |
 | **Subnet Placement** | `PRIVATE_ISOLATED` | `10.0.2.0/24` & `10.0.3.0/24` (Zero internet access) |
@@ -97,7 +97,7 @@ CareSync's relational persistence consists of **18 core tables** managed via Ale
 - **Finding**: For ECS tasks to pull container images from ECR, publish CloudWatch logs, and retrieve secrets from Secrets Manager without a NAT Gateway (~$32/mo), AWS VPC Interface Endpoints or public subnet execution with security group restrictions will be established in Phase 12E.
 
 ### 2. AWS Budget Status
-- **Status**: **`NOT_CONFIGURED`** on local development machine due to unconfigured AWS CLI credentials; specified in IaC configuration & environment settings (`infra/aws/config/environments.ts`).
+- **Status**: **`NOT_CONFIGURED`** on local development machine due to unconfigured AWS CLI credentials; specified in IaC configuration & environment settings (`infra/aws/config/environments.ts`). Target budget ceiling USD $20 with alerts at 25%, 50%, 75%, and 100%.
 
 ---
 
@@ -110,9 +110,11 @@ Synthesized CDK constructs:
 
 ---
 
-## 7. Cost Considerations
+## 7. Defensible Cost Considerations
 
-- **RDS `db.t4g.micro` Instance**: ~$11.50 / month (or $0 if within AWS 12-Month Free Tier allowance of 750 hrs/mo).
-- **gp3 Storage (20 GB)**: ~$2.30 / month.
+> **Official Cost Statement**: *"CareSync uses a cost-conscious RDS configuration designed to minimize AWS usage and leverage applicable Free Tier/credits. Actual cost depends on account eligibility, resource usage, and AWS pricing."*
+
+- **RDS `db.t4g.micro` Instance**: Eligible for AWS 12-Month Free Tier allowance (750 hours/month).
+- **gp3 Storage (20 GB)**: Eligible for AWS Free Tier allocation (20 GB database storage).
 - **Secrets Manager**: ~$0.40 / month per secret.
-- **Estimated Total Persistence Cost**: ~$14.20 / month max (well within the USD $20 target budget ceiling).
+- **NAT Gateway**: $0 (NAT Gateways strictly prohibited).
