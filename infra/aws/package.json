@@ -1,0 +1,26 @@
+{
+  "name": "caresync-infra-aws",
+  "version": "1.0.0",
+  "description": "CareSync AWS Infrastructure-as-Code (CDK TypeScript Skeleton)",
+  "private": true,
+  "bin": {
+    "caresync": "bin/caresync.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "echo \"No CDK unit tests required for 12A skeleton\" && exit 0",
+    "cdk": "cdk",
+    "synth": "cdk synth"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.3.3"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.3.0",
+    "source-map-support": "^0.5.21"
+  }
+}

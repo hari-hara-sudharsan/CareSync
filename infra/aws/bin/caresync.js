@@ -1,0 +1,20 @@
+#!/usr/bin/env node
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+require("source-map-support/register");
+const cdk = require("aws-cdk-lib");
+const caresync_stack_1 = require("../lib/caresync-stack");
+const environments_1 = require("../config/environments");
+const app = new cdk.App();
+const config = (0, environments_1.getEnvironmentConfig)();
+const stackName = `${config.projectName}-${config.environment}-stack`;
+new caresync_stack_1.CareSyncStack(app, stackName, {
+    env: {
+        account: process.env.CDK_DEFAULT_ACCOUNT,
+        region: config.region,
+    },
+    description: 'CareSync AWS Deployment Stack (Phase 12A IaC Skeleton)',
+    config,
+});
+app.synth();
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiY2FyZXN5bmMuanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyJjYXJlc3luYy50cyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7QUFDQSx1Q0FBcUM7QUFDckMsbUNBQW1DO0FBQ25DLDBEQUFzRDtBQUN0RCx5REFBOEQ7QUFFOUQsTUFBTSxHQUFHLEdBQUcsSUFBSSxHQUFHLENBQUMsR0FBRyxFQUFFLENBQUM7QUFDMUIsTUFBTSxNQUFNLEdBQUcsSUFBQSxtQ0FBb0IsR0FBRSxDQUFDO0FBRXRDLE1BQU0sU0FBUyxHQUFHLEdBQUcsTUFBTSxDQUFDLFdBQVcsSUFBSSxNQUFNLENBQUMsV0FBVyxRQUFRLENBQUM7QUFFdEUsSUFBSSw4QkFBYSxDQUFDLEdBQUcsRUFBRSxTQUFTLEVBQUU7SUFDaEMsR0FBRyxFQUFFO1FBQ0gsT0FBTyxFQUFFLE9BQU8sQ0FBQyxHQUFHLENBQUMsbUJBQW1CO1FBQ3hDLE1BQU0sRUFBRSxNQUFNLENBQUMsTUFBTTtLQUN0QjtJQUNELFdBQVcsRUFBRSx3REFBd0Q7SUFDckUsTUFBTTtDQUNQLENBQUMsQ0FBQztBQUVILEdBQUcsQ0FBQyxLQUFLLEVBQUUsQ0FBQyIsInNvdXJjZXNDb250ZW50IjpbIiMhL3Vzci9iaW4vZW52IG5vZGVcbmltcG9ydCAnc291cmNlLW1hcC1zdXBwb3J0L3JlZ2lzdGVyJztcbmltcG9ydCAqIGFzIGNkayBmcm9tICdhd3MtY2RrLWxpYic7XG5pbXBvcnQgeyBDYXJlU3luY1N0YWNrIH0gZnJvbSAnLi4vbGliL2NhcmVzeW5jLXN0YWNrJztcbmltcG9ydCB7IGdldEVudmlyb25tZW50Q29uZmlnIH0gZnJvbSAnLi4vY29uZmlnL2Vudmlyb25tZW50cyc7XG5cbmNvbnN0IGFwcCA9IG5ldyBjZGsuQXBwKCk7XG5jb25zdCBjb25maWcgPSBnZXRFbnZpcm9ubWVudENvbmZpZygpO1xuXG5jb25zdCBzdGFja05hbWUgPSBgJHtjb25maWcucHJvamVjdE5hbWV9LSR7Y29uZmlnLmVudmlyb25tZW50fS1zdGFja2A7XG5cbm5ldyBDYXJlU3luY1N0YWNrKGFwcCwgc3RhY2tOYW1lLCB7XG4gIGVudjoge1xuICAgIGFjY291bnQ6IHByb2Nlc3MuZW52LkNES19ERUZBVUxUX0FDQ09VTlQsXG4gICAgcmVnaW9uOiBjb25maWcucmVnaW9uLFxuICB9LFxuICBkZXNjcmlwdGlvbjogJ0NhcmVTeW5jIEFXUyBEZXBsb3ltZW50IFN0YWNrIChQaGFzZSAxMkEgSWFDIFNrZWxldG9uKScsXG4gIGNvbmZpZyxcbn0pO1xuXG5hcHAuc3ludGgoKTtcbiJdfQ==
