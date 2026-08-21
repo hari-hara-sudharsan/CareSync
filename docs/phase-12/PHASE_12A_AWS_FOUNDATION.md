@@ -38,7 +38,7 @@ Developer Local CLI / CI-CD Pipeline
   ┌──────────────┼──────────────┬──────────────┐
   ▼              ▼              ▼              ▼
 ECR Repos   ECS Tasks      RDS / Subnets   CloudWatch
-(Push images) (App Runner)  (Port 5432)   (JSON Logs)
+(Push images) (AWS Fargate) (Port 5432)   (JSON Logs)
 ```
 
 ### Required Minimal IAM Policy Scopes for CareSync Deployment
@@ -53,14 +53,16 @@ ECR Repos   ECS Tasks      RDS / Subnets   CloudWatch
 ## 4. Cost Guardrails & Budget Strategy
 
 - **Monthly Target Budget Ceiling**: **USD $20** (Hackathon presentation baseline).
+- **AWS Budget Creation Status**: **`SPECIFIED_IN_CONFIG`** (Documented in CDK configuration & architecture guidelines; will be created in AWS account upon initial deployment).
 - **Cost Alert Thresholds**:
   - `25%` ($5.00) $\to$ Warning Notification
   - `50%` ($10.00) $\to$ Mid-Month Audit Alert
   - `75%` ($15.00) $\to$ High Usage Escalation
   - `100%` ($20.00) $\to$ Critical Budget Threshold Reached
-- **NAT Gateway Prohibition**: NAT Gateways cost ~$32/month per gateway regardless of traffic. CareSync uses direct public/private subnet routing or AWS App Runner container hosting to eliminate NAT Gateway fees entirely.
+- **NAT Gateway Prohibition**: NAT Gateways cost ~$32/month per gateway regardless of traffic. CareSync network design avoids NAT Gateway fees.
+- **Approved Backend Target**: **Amazon ECS on AWS Fargate behind an Application Load Balancer (ALB)**.
 - **Free Tier / Credits Strategy**:
-  1. Use AWS App Runner / Fargate Free Tier compute hours where applicable.
+  1. Use AWS Fargate Free Tier compute allocation where applicable.
   2. Use RDS PostgreSQL `db.t4g.micro` Free Tier allocation.
   3. Shut down/delete demo container tasks immediately after presentation recording.
 
