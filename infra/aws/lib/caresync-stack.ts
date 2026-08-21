@@ -4,6 +4,7 @@ import { EnvironmentConfig, applyStandardTags } from '../config/environments';
 import { CareSyncVpcConstruct } from './caresync-vpc-construct';
 import { CareSyncRdsConstruct } from './caresync-rds-construct';
 import { CareSyncRedisConstruct } from './caresync-redis-construct';
+import { CareSyncEcsConstruct } from './caresync-ecs-construct';
 
 export interface CareSyncStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
@@ -13,6 +14,7 @@ export class CareSyncStack extends cdk.Stack {
   public readonly vpcConstruct: CareSyncVpcConstruct;
   public readonly rdsConstruct: CareSyncRdsConstruct;
   public readonly redisConstruct: CareSyncRedisConstruct;
+  public readonly ecsConstruct: CareSyncEcsConstruct;
 
   constructor(scope: Construct, id: string, props: CareSyncStackProps) {
     super(scope, id, props);
@@ -58,6 +60,14 @@ export class CareSyncStack extends cdk.Stack {
     this.redisConstruct = new CareSyncRedisConstruct(this, 'RedisConstruct', {
       config,
       vpcConstruct: this.vpcConstruct,
+    });
+
+    // Instantiate Phase 12E ECS Fargate & ALB Construct
+    this.ecsConstruct = new CareSyncEcsConstruct(this, 'EcsConstruct', {
+      config,
+      vpcConstruct: this.vpcConstruct,
+      rdsConstruct: this.rdsConstruct,
+      redisConstruct: this.redisConstruct,
     });
   }
 }
