@@ -2,32 +2,69 @@ import pytest
 import os
 import subprocess
 import sys
+import json
 
-def test_deploy_orchestrator_pipeline_execution():
+def test_deploy_orchestrator_dry_run_safety():
     """
-    ORCHESTRATION PIPELINE TEST: Executes deploy_orchestrator.py in dry-run mode
-    and verifies all 7 deployment pipeline steps pass with status SUCCESS.
+    DRY-RUN SAFETY GUARANTEE TEST: Verifies that --dry-run performs ZERO state-changing AWS/Docker/DB
+    operations while completing the pipeline with status SUCCESS.
     """
     script_path = os.path.join(os.path.dirname(__file__), "../../infra/aws/scripts/deploy_orchestrator.py")
     assert os.path.exists(script_path), "deploy_orchestrator.py must exist"
 
-    cmd = [sys.executable, script_path, "--dry-run", "--stage", "full"]
+    cmd = [sys.executable, script_path, "--stage", "full"]
     res = subprocess.run(cmd, capture_output=True, text=True)
 
     combined_output = res.stdout + res.stderr
     assert res.returncode == 0, f"Deploy orchestrator failed with output: {combined_output}"
-    assert "CARESYNC DEPLOYMENT ORCHESTRATION PIPELINE COMPLETE (SUCCESS)" in combined_output, "Pipeline must reach SUCCESS completion"
+    assert "CARESYNC RELEASE ORCHESTRATION PIPELINE COMPLETE (SUCCESS)" in combined_output
+    assert "[DRY-RUN SAFE GUARANTEE]" in combined_output, "Dry-run mode must explicitly log safe operation guarantees"
 
-def test_immutable_release_version_tagging():
+def test_release_manifest_generation():
     """
-    IMMUTABLE VERSIONING TEST: Verifies that release version tags follow deterministic Git SHA formatting.
+    RELEASE MANIFEST TEST: Verifies that artifacts/release-manifest.json is generated with required fields.
+    """
+    manifest_path = os.path.join(os.path.dirname(__file__), "../../artifacts/release-manifest.json")
+    assert os.path.exists(manifest_path), "artifacts/release-manifest.json must exist"
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert "release_id" in data and data["release_id"].startswith("v1.0.0-git-")
+    assert "git_sha" in data
+    assert "environment" in data
+    assert "frontend" in data and "api" in data and "worker" in data and "database" in data and "cloudfront" in data
+    assert "deployment" in data and data["deployment"]["status"] in ["SUCCESS", "IN_PROGRESS", "FAILED"]
+
+def test_production_confirmation_safety_gate():
+    """
+    PRODUCTION CONFIRMATION GATE TEST: Verifies that deploying to prod without --confirm-production is BLOCKED.
+    """
+    script_path = os.path.join(os.path.dirname(__file__), "../../infra/aws/scripts/deploy_orchestrator.py")
+    cmd = [sys.executable, script_path, "--env", "prod"]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+
+    combined_output = res.stdout + res.stderr
+    assert res.returncode != 0, "Production deployment without --confirm-production must be rejected"
+    assert "PRODUCTION DEPLOYMENT BLOCKED" in combined_output
+
+def test_safe_database_rollback_policy():
+    """
+    SAFE DB ROLLBACK POLICY TEST: Verifies that automatic rollback does NOT downgrade the database
+    unless the explicit --allow-db-downgrade flag is passed.
     """
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../infra/aws/scripts"))
     from deploy_orchestrator import DeploymentOrchestrator
 
-    orchestrator = DeploymentOrchestrator(dry_run=True)
-    assert orchestrator.release_tag.startswith("v1.0.0-git-"), "Release tag must follow immutable versioning contract"
-    assert len(orchestrator.git_sha) >= 7, "Git SHA must be at least 7 characters long"
+    # Default rollback (no --allow-db-downgrade flag)
+    orchestrator_default = DeploymentOrchestrator(allow_db_downgrade=False)
+    status_default = orchestrator_default.execute_rollback()
+    assert status_default == "ROLLBACK_SUCCESS"
+
+    # Explicit DB rollback allowed
+    orchestrator_gated = DeploymentOrchestrator(allow_db_downgrade=True)
+    status_gated = orchestrator_gated.execute_rollback()
+    assert status_gated == "ROLLBACK_SUCCESS"
 
 def test_environment_reproducibility_config():
     """

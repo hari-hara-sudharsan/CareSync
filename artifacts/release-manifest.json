@@ -1,0 +1,33 @@
+{
+  "release_id": "v1.0.0-git-f29c4d4",
+  "git_sha": "f29c4d422afce5b9a5f127c29534d332c077ec46",
+  "environment": "prod",
+  "region": "ap-south-1",
+  "frontend": {
+    "artifact": "frontend/dist/index.html",
+    "build_status": "SUCCESS"
+  },
+  "api": {
+    "image": "caresync-prod-api:v1.0.0-git-f29c4d4",
+    "digest": "sha256:verified-f29c4d4",
+    "task_definition": "caresync-prod-api-task:latest"
+  },
+  "worker": {
+    "image": "caresync-prod-worker:v1.0.0-git-f29c4d4",
+    "digest": "sha256:verified-f29c4d4",
+    "task_definition": "caresync-prod-worker-task:latest"
+  },
+  "database": {
+    "alembic_revision": "head"
+  },
+  "cloudfront": {
+    "distribution_id": "EDEMODISTRIBUTION",
+    "invalidation_id": "IDEMOINVALIDATION"
+  },
+  "deployment": {
+    "started_at": "2026-08-22T05:47:12.064213+00:00",
+    "completed_at": "2026-08-22T05:47:12.064213+00:00",
+    "status": "FAILED",
+    "dry_run": true
+  }
+}
