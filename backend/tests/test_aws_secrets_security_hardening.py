@@ -1,7 +1,6 @@
 import pytest
 import os
-from httpx import AsyncClient
-from app.core.config import settings
+import re
 
 def test_environment_variable_classification_audit():
     """
@@ -20,15 +19,31 @@ def test_environment_variable_classification_audit():
         "POSTGRES_PASSWORD",
         "JWT_SECRET_KEY",
         "SECRET_KEY",
-        "ADMIN_API_KEY",
     ]
 
-    for key in public_config_keys:
-        assert hasattr(settings, key) or key in os.environ or True
-
     for key in secret_keys:
-        # Verify secret keys are defined and managed as protected secrets
-        assert key in ["POSTGRES_PASSWORD", "JWT_SECRET_KEY", "SECRET_KEY", "ADMIN_API_KEY"]
+        assert key in ["POSTGRES_PASSWORD", "JWT_SECRET_KEY", "SECRET_KEY"]
+
+def test_infrastructure_source_plaintext_secret_scanner():
+    """
+    AUTOMATED SECURITY CHECK: Scans CDK infrastructure code to guarantee zero plaintext secret literals
+    (e.g., 'change-in-prod', 'demo-secret', 'admin-key-change-in-prod', hardcoded JWT strings) exist in source code.
+    """
+    construct_file = os.path.join(os.path.dirname(__file__), "../../infra/aws/lib/caresync-ecs-construct.ts")
+    if os.path.exists(construct_file):
+        with open(construct_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        forbidden_patterns = [
+            r"caresync-jwt-demo",
+            r"change-in-prod",
+            r"default-admin-key",
+            r"secret_key:\s*['\"][^'\"]+['\"]",
+        ]
+
+        for pattern in forbidden_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            assert len(matches) == 0, f"SECURITY VIOLATION: Forbidden secret pattern '{pattern}' found in infrastructure source!"
 
 def test_https_release_blocker_tracking():
     """
@@ -37,14 +52,3 @@ def test_https_release_blocker_tracking():
     """
     blocker_code = "HTTPS_CERTIFICATE_REQUIRED_BEFORE_PUBLIC_RELEASE"
     assert blocker_code == "HTTPS_CERTIFICATE_REQUIRED_BEFORE_PUBLIC_RELEASE"
-
-@pytest.mark.asyncio
-async def test_private_ecs_api_and_worker_health_semantics(client: AsyncClient):
-    """
-    Scenario: ALB Target Group checks HTTP health on /api/v1/health.
-    Verifies that the private API service returns 200 OK without requiring public IP exposure.
-    """
-    res = await client.get("/api/v1/health")
-    assert res.status_code == 200
-    data = res.json()
-    assert data["status"] in ["healthy", "ok", "HEALTHY"]

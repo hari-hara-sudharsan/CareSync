@@ -1,3 +1,4 @@
+import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -20,6 +21,8 @@ export declare class CareSyncEcsConstruct extends Construct {
     readonly targetGroup: elbv2.ApplicationTargetGroup;
     readonly fargateService: ecs.FargateService;
     readonly workerFargateService: ecs.FargateService;
+    readonly apiRepository: ecr.Repository;
+    readonly workerRepository: ecr.Repository;
     readonly appSecret: secretsmanager.ISecret;
     readonly logGroup: logs.LogGroup;
     readonly workerLogGroup: logs.LogGroup;
