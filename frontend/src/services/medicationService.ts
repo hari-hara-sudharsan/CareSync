@@ -5,6 +5,8 @@ import type {
   MedicationEvent,
 } from '@/types/medication';
 
+import { getApiBaseUrl } from './apiConfig';
+
 /**
  * CareSync Medication Service
  * 
@@ -12,7 +14,9 @@ import type {
  * Maintains strict medical safety boundary: no diagnostic advice or dosage mutations.
  */
 class CareSyncMedicationService implements MedicationServiceContract {
-  public baseUrl = 'http://localhost:8000/api/v1';
+  public get baseUrl(): string {
+    return getApiBaseUrl();
+  }
 
   async getTodayMedicationTimeline(parentId: string): Promise<TodayMedicationTimelineResponse> {
     console.info(`[MedicationService] Fetching medication timeline for ${parentId}`);

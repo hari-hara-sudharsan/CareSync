@@ -13,6 +13,7 @@ export interface CareSyncEcsConstructProps {
     vpcConstruct: CareSyncVpcConstruct;
     rdsConstruct: CareSyncRdsConstruct;
     redisConstruct: CareSyncRedisConstruct;
+    certificateArn?: string;
 }
 export declare class CareSyncEcsConstruct extends Construct {
     readonly cluster: ecs.Cluster;

@@ -3,6 +3,7 @@ import type {
   DecisionServiceContract,
 } from '@/types/family';
 import { authService } from './authService';
+import { getApiBaseUrl } from './apiConfig';
 
 /**
  * CareSync Decision Inbox Service
@@ -11,7 +12,9 @@ import { authService } from './authService';
  * with Bearer authorization and idempotency headers.
  */
 class CareSyncDecisionService implements DecisionServiceContract {
-  public baseUrl = 'http://localhost:8000/api/v1';
+  public get baseUrl(): string {
+    return getApiBaseUrl();
+  }
 
   async getPendingDecisions(caregiverId: string, parentId?: string): Promise<DecisionCardData[]> {
     const pid = parentId || authService.getActiveParentId();

@@ -5,6 +5,7 @@ import type {
   CheckInServiceContract,
 } from '@/types/checkin';
 import { authService } from '@/services/authService';
+import { getApiBaseUrl } from './apiConfig';
 
 /**
  * CareSync Check-In Service
@@ -13,7 +14,9 @@ import { authService } from '@/services/authService';
  * Propagates Bearer authorization headers and idempotency keys.
  */
 class CareSyncCheckInService implements CheckInServiceContract {
-  public baseUrl = 'http://localhost:8000/api/v1';
+  public get baseUrl(): string {
+    return getApiBaseUrl();
+  }
 
   async submitCheckIn(checkInData: Omit<CheckIn, 'id' | 'timestamp'>): Promise<CheckInResult> {
     const parentId = checkInData.parentId || authService.getActiveParentId();

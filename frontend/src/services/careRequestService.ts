@@ -5,6 +5,7 @@ import type {
   CareRequestServiceContract,
 } from '@/types/care-request';
 import { authService } from './authService';
+import { getApiBaseUrl } from './apiConfig';
 
 /**
  * CareSync Care Request & Assignment Service
@@ -13,7 +14,9 @@ import { authService } from './authService';
  * using Bearer authorization headers with fallback to local domain contracts.
  */
 class CareSyncCareRequestService implements CareRequestServiceContract {
-  public baseUrl = 'http://localhost:8000/api/v1';
+  public get baseUrl(): string {
+    return getApiBaseUrl();
+  }
 
   async getCareRequests(
     caregiverId: string,

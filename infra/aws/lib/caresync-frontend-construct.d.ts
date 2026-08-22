@@ -6,9 +6,11 @@ import { CareSyncEcsConstruct } from './caresync-ecs-construct';
 export interface CareSyncFrontendConstructProps {
     config: EnvironmentConfig;
     ecsConstruct: CareSyncEcsConstruct;
+    useHttpsAlbOrigin?: boolean;
 }
 export declare class CareSyncFrontendConstruct extends Construct {
     readonly bucket: s3.Bucket;
     readonly distribution: cloudfront.Distribution;
+    readonly responseHeadersPolicy: cloudfront.ResponseHeadersPolicy;
     constructor(scope: Construct, id: string, props: CareSyncFrontendConstructProps);
 }

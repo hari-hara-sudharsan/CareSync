@@ -1,4 +1,5 @@
 import type { AuthServiceContract, SendOtpRequest, VerifyOtpRequest, AuthResponse } from '@/types/auth';
+import { getApiBaseUrl } from './apiConfig';
 
 /**
  * CareSync Unified Authentication & Session Service
@@ -6,7 +7,9 @@ import type { AuthServiceContract, SendOtpRequest, VerifyOtpRequest, AuthRespons
  * Manages JWT session tokens, active parent context switching, and Bearer Authorization headers.
  */
 class CareSyncAuthService implements AuthServiceContract {
-  public baseUrl = 'http://localhost:8000/api/v1';
+  public get baseUrl(): string {
+    return getApiBaseUrl();
+  }
 
   public getToken(): string | null {
     return localStorage.getItem('caresync_token') || sessionStorage.getItem('caresync_token');

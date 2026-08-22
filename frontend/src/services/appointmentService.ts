@@ -6,6 +6,8 @@ import type {
   TransportationRequestIntent,
 } from '@/types/appointment';
 
+import { getApiBaseUrl } from './apiConfig';
+
 /**
  * CareSync Appointment & Transportation Service
  * 
@@ -13,7 +15,9 @@ import type {
  * Maintains domain boundary: selecting NEED_HELP creates a TransportationRequest + CareRequest.
  */
 class CareSyncAppointmentService implements AppointmentServiceContract {
-  public baseUrl = 'http://localhost:8000/api/v1';
+  public get baseUrl(): string {
+    return getApiBaseUrl();
+  }
 
   async getUpcomingAppointments(parentId: string): Promise<Appointment[]> {
     console.info(`[AppointmentService] Fetching upcoming appointments for ${parentId}`);

@@ -13,11 +13,14 @@ import { CareSyncVpcConstruct } from './caresync-vpc-construct';
 import { CareSyncRdsConstruct } from './caresync-rds-construct';
 import { CareSyncRedisConstruct } from './caresync-redis-construct';
 
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+
 export interface CareSyncEcsConstructProps {
   config: EnvironmentConfig;
   vpcConstruct: CareSyncVpcConstruct;
   rdsConstruct: CareSyncRdsConstruct;
   redisConstruct: CareSyncRedisConstruct;
+  certificateArn?: string;
 }
 
 export class CareSyncEcsConstruct extends Construct {
@@ -215,12 +218,30 @@ export class CareSyncEcsConstruct extends Construct {
       },
     });
 
-    // 10. HTTP Listener (Forward Port 80 to Target Group)
-    this.listener = this.alb.addListener('HttpListener', {
-      port: 80,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      defaultTargetGroups: [this.targetGroup],
-    });
+    // 10. ALB Listener (HTTPS Port 443 if certificate provided, otherwise HTTP Port 80 for demo baseline)
+    if (props.certificateArn) {
+      const certificate = acm.Certificate.fromCertificateArn(this, 'AlbCertificate', props.certificateArn);
+      
+      this.listener = this.alb.addListener('HttpsListener', {
+        port: 443,
+        protocol: elbv2.ApplicationProtocol.HTTPS,
+        certificates: [certificate],
+        defaultTargetGroups: [this.targetGroup],
+      });
+
+      this.alb.addRedirect({
+        sourcePort: 80,
+        sourceProtocol: elbv2.ApplicationProtocol.HTTP,
+        targetPort: 443,
+        targetProtocol: elbv2.ApplicationProtocol.HTTPS,
+      });
+    } else {
+      this.listener = this.alb.addListener('HttpListener', {
+        port: 80,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+        defaultTargetGroups: [this.targetGroup],
+      });
+    }
 
     // 11. API Fargate Service (PRIVATE_ISOLATED Subnets, AssignPublicIp: DISABLED)
     this.fargateService = new ecs.FargateService(this, 'FargateService', {
