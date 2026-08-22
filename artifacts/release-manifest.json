@@ -1,6 +1,6 @@
 {
-  "release_id": "v1.0.0-git-2176c4a",
-  "git_sha": "2176c4a39330c942f9d299e561b8301fb03b3963",
+  "release_id": "v1.0.0-git-0cd90d4",
+  "git_sha": "0cd90d45e52352c1dbf2e0032b905f3e7ad776ec",
   "environment": "prod",
   "region": "ap-south-1",
   "frontend": {
@@ -9,12 +9,12 @@
   },
   "api": {
     "repository": "123456789012.dkr.ecr.ap-south-1.amazonaws.com/caresync-prod-api",
-    "image_tag": "v1.0.0-git-2176c4a",
+    "image_tag": "v1.0.0-git-0cd90d4",
     "image_digest": null
   },
   "worker": {
     "repository": "123456789012.dkr.ecr.ap-south-1.amazonaws.com/caresync-prod-worker",
-    "image_tag": "v1.0.0-git-2176c4a",
+    "image_tag": "v1.0.0-git-0cd90d4",
     "image_digest": null
   },
   "ecs": {
@@ -30,8 +30,8 @@
     "invalidation_id": null
   },
   "deployment": {
-    "started_at": "2026-08-22T05:56:50.423723+00:00",
-    "completed_at": "2026-08-22T05:56:50.423723+00:00",
+    "started_at": "2026-08-22T06:09:28.325394+00:00",
+    "completed_at": "2026-08-22T06:09:28.325394+00:00",
     "status": "FAILED",
     "dry_run": true
   }

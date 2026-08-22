@@ -20,6 +20,31 @@ def test_deploy_orchestrator_dry_run_safety():
     assert "CARESYNC RELEASE ORCHESTRATION PIPELINE COMPLETE (SUCCESS)" in combined_output
     assert "[DRY-RUN SAFE GUARANTEE]" in combined_output, "Dry-run mode must explicitly log safe operation guarantees"
 
+def test_live_mode_cloudfront_domain_requirement():
+    """
+    LIVE MODE CLOUDFRONT REQUIREMENT TEST: Verifies that in --live mode, missing CloudFrontDomainName
+    blocks verification and fails deployment without falling back to localhost.
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../infra/aws/scripts"))
+    from deploy_orchestrator import DeploymentOrchestrator
+
+    orchestrator = DeploymentOrchestrator(dry_run=False, live=True)
+    orchestrator.cloudfront_domain = None  # Missing domain in live mode
+
+    success = orchestrator.step_7_post_deployment_http_verification()
+    assert success is False, "Live mode post-deployment verification must FAIL if CloudFrontDomainName is missing"
+
+def test_all_10_verification_checks_contract():
+    """
+    VERIFICATION SUITE TEST: Verifies that step_7_post_deployment_http_verification defines all 10 verification checks.
+    """
+    script_path = os.path.join(os.path.dirname(__file__), "../../infra/aws/scripts/deploy_orchestrator.py")
+    with open(script_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    for check_num in range(1, 11):
+        assert f"CHECK {check_num}/10" in content or f"CHECK {check_num}" in content, f"Orchestrator must define CHECK {check_num}/10"
+
 def test_truthful_release_manifest_structure():
     """
     TRUTHFUL MANIFEST TEST: Verifies that artifacts/release-manifest.json is generated without fake placeholders.
@@ -36,7 +61,7 @@ def test_truthful_release_manifest_structure():
     assert "api" in data and "image_tag" in data["api"]
     assert "worker" in data and "image_tag" in data["worker"]
     assert "ecs" in data and "database" in data and "cloudfront" in data and "deployment" in data
-    assert data["deployment"]["status"] in ["SUCCESS", "IN_PROGRESS", "FAILED"]
+    assert data["deployment"]["status"] in ["SUCCESS", "IN_PROGRESS", "FAILED", "ROLLBACK_SUCCESS", "ROLLBACK_FAILED"]
 
 def test_production_confirmation_safety_gate():
     """
