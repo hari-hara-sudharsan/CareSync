@@ -29,8 +29,8 @@ def test_cloudfront_frontend_cdk_construct_verification():
     assert "HeadersFrameOption.DENY" in content, "Security headers must include FrameOption DENY"
 
     # 5. Authorization Header Preservation Verification
-    assert "OriginRequestHeaderBehavior.allowList" in content, "CloudFront OriginRequestPolicy must allowlist required API headers"
-    assert "'Authorization'" in content, "OriginRequestPolicy must explicitly preserve Authorization header"
+    assert "CacheHeaderBehavior.allowList" in content, "CloudFront CachePolicy must allowlist required API headers"
+    assert "'Authorization'" in content, "CachePolicy must explicitly preserve Authorization header"
 
     # 6. SPA Client-Side Routing Fallbacks
     assert "responsePagePath: '/index.html'" in content, "CloudFront error responses must rewrite to /index.html"
