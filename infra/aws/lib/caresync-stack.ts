@@ -5,6 +5,7 @@ import { CareSyncVpcConstruct } from './caresync-vpc-construct';
 import { CareSyncRdsConstruct } from './caresync-rds-construct';
 import { CareSyncRedisConstruct } from './caresync-redis-construct';
 import { CareSyncEcsConstruct } from './caresync-ecs-construct';
+import { CareSyncFrontendConstruct } from './caresync-frontend-construct';
 
 export interface CareSyncStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
@@ -15,6 +16,7 @@ export class CareSyncStack extends cdk.Stack {
   public readonly rdsConstruct: CareSyncRdsConstruct;
   public readonly redisConstruct: CareSyncRedisConstruct;
   public readonly ecsConstruct: CareSyncEcsConstruct;
+  public readonly frontendConstruct: CareSyncFrontendConstruct;
 
   constructor(scope: Construct, id: string, props: CareSyncStackProps) {
     super(scope, id, props);
@@ -62,12 +64,18 @@ export class CareSyncStack extends cdk.Stack {
       vpcConstruct: this.vpcConstruct,
     });
 
-    // Instantiate Phase 12E ECS Fargate & ALB Construct
+    // Instantiate Phase 12E/12F ECS Fargate & ALB Construct
     this.ecsConstruct = new CareSyncEcsConstruct(this, 'EcsConstruct', {
       config,
       vpcConstruct: this.vpcConstruct,
       rdsConstruct: this.rdsConstruct,
       redisConstruct: this.redisConstruct,
+    });
+
+    // Instantiate Phase 12G Frontend S3 + CloudFront CDN Construct
+    this.frontendConstruct = new CareSyncFrontendConstruct(this, 'FrontendConstruct', {
+      config,
+      ecsConstruct: this.ecsConstruct,
     });
   }
 }
