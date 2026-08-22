@@ -1,6 +1,6 @@
 {
-  "release_id": "v1.0.0-git-f29c4d4",
-  "git_sha": "f29c4d422afce5b9a5f127c29534d332c077ec46",
+  "release_id": "v1.0.0-git-2176c4a",
+  "git_sha": "2176c4a39330c942f9d299e561b8301fb03b3963",
   "environment": "prod",
   "region": "ap-south-1",
   "frontend": {
@@ -8,25 +8,30 @@
     "build_status": "SUCCESS"
   },
   "api": {
-    "image": "caresync-prod-api:v1.0.0-git-f29c4d4",
-    "digest": "sha256:verified-f29c4d4",
-    "task_definition": "caresync-prod-api-task:latest"
+    "repository": "123456789012.dkr.ecr.ap-south-1.amazonaws.com/caresync-prod-api",
+    "image_tag": "v1.0.0-git-2176c4a",
+    "image_digest": null
   },
   "worker": {
-    "image": "caresync-prod-worker:v1.0.0-git-f29c4d4",
-    "digest": "sha256:verified-f29c4d4",
-    "task_definition": "caresync-prod-worker-task:latest"
+    "repository": "123456789012.dkr.ecr.ap-south-1.amazonaws.com/caresync-prod-worker",
+    "image_tag": "v1.0.0-git-2176c4a",
+    "image_digest": null
+  },
+  "ecs": {
+    "api_task_definition": null,
+    "worker_task_definition": null
   },
   "database": {
-    "alembic_revision": "head"
+    "alembic_revision": null
   },
   "cloudfront": {
-    "distribution_id": "EDEMODISTRIBUTION",
-    "invalidation_id": "IDEMOINVALIDATION"
+    "distribution_id": null,
+    "domain_name": null,
+    "invalidation_id": null
   },
   "deployment": {
-    "started_at": "2026-08-22T05:47:12.064213+00:00",
-    "completed_at": "2026-08-22T05:47:12.064213+00:00",
+    "started_at": "2026-08-22T05:56:50.423723+00:00",
+    "completed_at": "2026-08-22T05:56:50.423723+00:00",
     "status": "FAILED",
     "dry_run": true
   }

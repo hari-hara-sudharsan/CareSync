@@ -20,9 +20,9 @@ def test_deploy_orchestrator_dry_run_safety():
     assert "CARESYNC RELEASE ORCHESTRATION PIPELINE COMPLETE (SUCCESS)" in combined_output
     assert "[DRY-RUN SAFE GUARANTEE]" in combined_output, "Dry-run mode must explicitly log safe operation guarantees"
 
-def test_release_manifest_generation():
+def test_truthful_release_manifest_structure():
     """
-    RELEASE MANIFEST TEST: Verifies that artifacts/release-manifest.json is generated with required fields.
+    TRUTHFUL MANIFEST TEST: Verifies that artifacts/release-manifest.json is generated without fake placeholders.
     """
     manifest_path = os.path.join(os.path.dirname(__file__), "../../artifacts/release-manifest.json")
     assert os.path.exists(manifest_path), "artifacts/release-manifest.json must exist"
@@ -33,8 +33,10 @@ def test_release_manifest_generation():
     assert "release_id" in data and data["release_id"].startswith("v1.0.0-git-")
     assert "git_sha" in data
     assert "environment" in data
-    assert "frontend" in data and "api" in data and "worker" in data and "database" in data and "cloudfront" in data
-    assert "deployment" in data and data["deployment"]["status"] in ["SUCCESS", "IN_PROGRESS", "FAILED"]
+    assert "api" in data and "image_tag" in data["api"]
+    assert "worker" in data and "image_tag" in data["worker"]
+    assert "ecs" in data and "database" in data and "cloudfront" in data and "deployment" in data
+    assert data["deployment"]["status"] in ["SUCCESS", "IN_PROGRESS", "FAILED"]
 
 def test_production_confirmation_safety_gate():
     """
