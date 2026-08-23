@@ -5,7 +5,7 @@ from sqlalchemy import select, desc
 
 from app.core.database import get_db
 from app.core.rate_limiter import rate_limiter
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin_role, require_roles
 from app.models.user import User
 from app.trust.models import VerificationRecord, Complaint
 from app.trust.verification import VerificationService
@@ -22,6 +22,31 @@ class ComplaintCreateSchema(BaseModel):
     category: str # TASK_NOT_COMPLETED, LATE_ARRIVAL, NO_SHOW, SAFETY_CONCERN
     safety_severity: str = "NONE" # NONE, CONCERN, HIGH, EMERGENCY
     description: str
+
+@router.get("/dashboard", summary="Get Administrative Trust & Safety Dashboard")
+async def get_trust_dashboard(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(["ADMIN", "COORDINATOR"])),
+):
+    """
+    Administrative Trust & Safety Dashboard.
+    Strictly guarded by ADMIN or COORDINATOR role boundary.
+    Direct access by PARENT, FAMILY, or VOLUNTEER returns HTTP 403 Forbidden.
+    """
+    res_complaints = await db.execute(select(Complaint).order_by(desc(Complaint.created_at)).limit(20))
+    complaints = res_complaints.scalars().all()
+
+    res_verifications = await db.execute(select(VerificationRecord).order_by(desc(VerificationRecord.created_at)).limit(20))
+    verifications = res_verifications.scalars().all()
+
+    return {
+        "admin_id": current_user.id,
+        "total_complaints_count": len(complaints),
+        "pending_verifications_count": len([v for v in verifications if v.status == "PENDING"]),
+        "high_severity_alerts": len([c for c in complaints if c.safety_severity in ["HIGH", "EMERGENCY"]]),
+        "recent_complaints": complaints,
+        "recent_verifications": verifications,
+    }
 
 @router.get("/verification/{user_id}", summary="Get User Verification Status")
 async def get_verification_status(
@@ -61,9 +86,7 @@ async def file_complaint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Rate Limiting & Abuse Protection: Max 3 complaints per minute per user
     rate_limiter.check_rate_limit("complaint_file", current_user.id, max_requests=3, window_seconds=60)
-
     await CareRequestService.verify_parent_access(db, current_user.id, payload.parent_id)
 
     result = await ComplaintService.file_complaint(

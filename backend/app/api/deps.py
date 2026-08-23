@@ -1,4 +1,4 @@
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, List, Callable
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +44,28 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+def require_roles(allowed_roles: List[str]) -> Callable:
+    """
+    Role-Based Access Control (RBAC) Security Boundary.
+    Enforces that current_user.role is contained within allowed_roles or is ADMIN.
+    Rejects unauthorized access attempts with HTTP 403 Forbidden.
+    """
+    async def role_checker(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role == "ADMIN" or current_user.role in allowed_roles:
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access Denied: Role '{current_user.role}' is not authorized to access this resource."
+        )
+    return role_checker
+
+# Role-specific shortcut dependency guards
+require_parent_role = require_roles(["PARENT", "PRIMARY_GUARDIAN", "ADMIN"])
+require_family_role = require_roles(["FAMILY", "PRIMARY_GUARDIAN", "PARENT", "ADMIN"])
+require_volunteer_role = require_roles(["VOLUNTEER", "ADMIN"])
+require_coordinator_role = require_roles(["COORDINATOR", "ADMIN"])
+require_admin_role = require_roles(["ADMIN"])
 
 async def verify_parent_authorization(
     parent_id: str,
