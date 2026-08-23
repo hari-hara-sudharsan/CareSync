@@ -13,6 +13,7 @@ import { FamilyCareRequestsPage } from '@/features/family/requests/FamilyCareReq
 import { VolunteerHomePage } from '@/features/volunteer/VolunteerHomePage';
 import { CoordinatorAdminPage } from '@/features/admin/CoordinatorAdminPage';
 import { DesignSystemPage } from '@/features/admin/DesignSystemPage';
+import { authService } from '@/services/authService';
 
 export const AppRouter: React.FC = () => {
   const getInitialPath = () => {
@@ -36,10 +37,12 @@ export const AppRouter: React.FC = () => {
   };
 
   const [currentPath, setCurrentPath] = useState<string>(getInitialPath);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!authService.getToken());
 
   useEffect(() => {
     const handlePopState = () => {
       setCurrentPath(getInitialPath());
+      setIsAuthenticated(!!authService.getToken());
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -54,9 +57,19 @@ export const AppRouter: React.FC = () => {
     setCurrentPath(path);
     window.location.hash = `#${path}`;
     window.history.pushState({}, '', `#${path}`);
+    setIsAuthenticated(!!authService.getToken());
+  };
+
+  const isPublicRoute = (path: string) => {
+    return path === '/parent/welcome' || path === '/parent/login' || path === '/design-system';
   };
 
   const renderContent = () => {
+    // Route Guard: Redirect unauthenticated requests to login
+    if (!isAuthenticated && !isPublicRoute(currentPath)) {
+      return <ParentLoginPage onNavigate={navigate} />;
+    }
+
     if (currentPath === '/design-system') return <DesignSystemPage />;
     if (currentPath === '/parent/login') return <ParentLoginPage onNavigate={navigate} />;
     if (currentPath === '/parent/onboarding') return <ParentOnboardingPage onNavigate={navigate} />;
@@ -75,55 +88,35 @@ export const AppRouter: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-50">
-      {/* Top Workspace Persona Switcher Bar */}
+      {/* Top Session Header Bar */}
       <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs sticky top-0 z-50">
         <div className="flex items-center space-x-2">
           <span className="font-bold text-teal-400 text-sm tracking-wide">CareSync Workspace</span>
           <span className="text-slate-500">•</span>
-          <span className="text-slate-400 font-medium">Persona Persona Integration</span>
+          <span className="text-slate-400 font-medium">
+            {isAuthenticated ? '🔒 Session Authenticated' : '👤 Guest / Unauthenticated'}
+          </span>
         </div>
 
-        <div className="flex items-center space-x-1 sm:space-x-2">
-          <button
-            onClick={() => navigate('/parent/home')}
-            className={`px-3 py-1 rounded-lg transition-all font-medium ${
-              currentPath.startsWith('/parent')
-                ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            👵 Parent
-          </button>
-          <button
-            onClick={() => navigate('/family/home')}
-            className={`px-3 py-1 rounded-lg transition-all font-medium ${
-              currentPath.startsWith('/family')
-                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            👨‍👩‍👧 Family
-          </button>
-          <button
-            onClick={() => navigate('/volunteer/home')}
-            className={`px-3 py-1 rounded-lg transition-all font-medium ${
-              currentPath.startsWith('/volunteer')
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            🤝 Volunteer
-          </button>
-          <button
-            onClick={() => navigate('/admin/dashboard')}
-            className={`px-3 py-1 rounded-lg transition-all font-medium ${
-              currentPath.startsWith('/admin')
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            ⚙️ Admin
-          </button>
+        <div className="flex items-center space-x-2">
+          {isAuthenticated ? (
+            <button
+              onClick={() => {
+                authService.logout();
+                navigate('/parent/login');
+              }}
+              className="px-3 py-1 bg-red-500/20 text-red-300 border border-red-500/40 rounded-lg font-bold hover:bg-red-500/30 transition-all"
+            >
+              Sign Out
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate('/parent/login')}
+              className="px-3 py-1 bg-teal-500/20 text-teal-300 border border-teal-500/40 rounded-lg font-bold hover:bg-teal-500/30 transition-all"
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </header>
 

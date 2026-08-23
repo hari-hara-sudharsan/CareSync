@@ -17,32 +17,20 @@ async def get_current_user(
 ) -> User:
     """
     Resolves authenticated user from JWT Bearer Token.
-    Fails with HTTP 401 Unauthorized if token is missing or invalid.
+    Fails with HTTP 401 Unauthorized if token is missing, invalid, or user is inactive.
     """
     if not token:
-        # Default testing fallback user if unauthenticated during automated test suite execution
-        result = await db.execute(select(User).where(User.id == "usr-demo-1"))
-        user = result.scalars().first()
-        if not user:
-            user = User(
-                id="usr-demo-1",
-                phone="+15552345678",
-                full_name="David Woodson",
-                email="david.woodson@example.com",
-                role="PRIMARY_GUARDIAN",
-                is_active=True,
-                is_verified=True,
-            )
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
-        return user
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate authentication credentials. Bearer token required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     payload = decode_access_token(token)
     if not payload or "sub" not in payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate authentication credentials.",
+            detail="Could not validate authentication credentials. Invalid or expired token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -53,6 +41,7 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account not found or inactive.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     return user
 

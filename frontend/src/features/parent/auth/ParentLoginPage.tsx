@@ -7,7 +7,7 @@ import { CareOTPInput } from '@/components/ui/CareOTPInput';
 import { CareInlineAlert } from '@/components/feedback/CareInlineAlert';
 import { CareModal } from '@/components/feedback/CareModal';
 import { authService } from '@/services/authService';
-import type { AuthState, AuthErrorCode } from '@/types/auth';
+import type { AuthState } from '@/types/auth';
 import {
   ArrowLeft,
   ArrowRight,
@@ -16,7 +16,6 @@ import {
   HelpCircle,
   RefreshCw,
   CheckCircle2,
-  Sliders,
   UserCheck,
 } from 'lucide-react';
 
@@ -40,7 +39,7 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
     otpCode: '',
     isSendingOtp: false,
     isVerifyingOtp: false,
-    resendCountdown: 45,
+    resendCountdown: 60,
     canResend: false,
     errorCode: null,
     errorMessage: null,
@@ -49,7 +48,6 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
   });
 
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
-  const [qaErrorSim, setQaErrorSim] = useState<AuthErrorCode | 'NONE'>('NONE');
 
   // Resend Countdown Timer
   useEffect(() => {
@@ -79,8 +77,7 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
     e.preventDefault();
     const cleanPhone = authState.phoneNumber.replace(/\D/g, '');
 
-    // QA Error Simulation Check
-    if (qaErrorSim === 'INVALID_PHONE' || cleanPhone.length < 10) {
+    if (cleanPhone.length < 10) {
       setAuthState((prev) => ({
         ...prev,
         errorCode: 'INVALID_PHONE',
@@ -89,47 +86,31 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
       return;
     }
 
-    if (qaErrorSim === 'NETWORK_UNAVAILABLE') {
-      setAuthState((prev) => ({
-        ...prev,
-        errorCode: 'NETWORK_UNAVAILABLE',
-        errorMessage: 'Unable to connect to CareSync. Please check your internet connection.',
-      }));
-      return;
-    }
-
-    if (qaErrorSim === 'ACCOUNT_NOT_FOUND') {
-      setAuthState((prev) => ({
-        ...prev,
-        errorCode: 'ACCOUNT_NOT_FOUND',
-        errorMessage: 'No registered parent account found for this phone number.',
-      }));
-      return;
-    }
-
     setAuthState((prev) => ({ ...prev, isSendingOtp: true, errorCode: null, errorMessage: null }));
 
-    try {
-      await authService.sendOtp({
-        countryCode: authState.countryCode,
-        phoneNumber: cleanPhone,
-      });
+    const res = await authService.sendOtp({
+      countryCode: authState.countryCode,
+      phoneNumber: cleanPhone,
+    });
 
+    if (res.success) {
       setAuthState((prev) => ({
         ...prev,
         step: 'OTP_VERIFICATION',
         isSendingOtp: false,
-        resendCountdown: 45,
+        resendCountdown: 60,
         canResend: false,
         otpCode: '',
         attemptCount: 0,
+        errorCode: null,
+        errorMessage: null,
       }));
-    } catch {
+    } else {
       setAuthState((prev) => ({
         ...prev,
         isSendingOtp: false,
-        errorCode: 'SERVER_UNAVAILABLE',
-        errorMessage: 'CareSync service is temporarily unavailable. Please try again.',
+        errorCode: res.errorCode || 'SERVER_UNAVAILABLE',
+        errorMessage: res.errorMessage || 'Unable to request verification code. Please try again.',
       }));
     }
   };
@@ -146,70 +127,31 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
       return;
     }
 
-    // QA Error Simulation
-    if (qaErrorSim === 'INCORRECT_OTP') {
-      const nextAttempts = authState.attemptCount + 1;
-      if (nextAttempts >= authState.maxAttempts) {
-        setAuthState((prev) => ({
-          ...prev,
-          errorCode: 'TOO_MANY_ATTEMPTS',
-          errorMessage: 'Too many incorrect attempts. Account locked for 15 minutes for your security.',
-          attemptCount: nextAttempts,
-        }));
-      } else {
-        setAuthState((prev) => ({
-          ...prev,
-          errorCode: 'INCORRECT_OTP',
-          errorMessage: `Incorrect 6-digit code. Please check and try again. (Attempt ${nextAttempts} of ${authState.maxAttempts})`,
-          attemptCount: nextAttempts,
-        }));
-      }
-      return;
-    }
-
-    if (qaErrorSim === 'EXPIRED_OTP') {
-      setAuthState((prev) => ({
-        ...prev,
-        errorCode: 'EXPIRED_OTP',
-        errorMessage: 'The verification code has expired. Please tap "Resend Code".',
-      }));
-      return;
-    }
-
-    if (qaErrorSim === 'ACCOUNT_LOCKED') {
-      setAuthState((prev) => ({
-        ...prev,
-        errorCode: 'ACCOUNT_LOCKED',
-        errorMessage: 'Your account is temporarily locked for security. Please contact support.',
-      }));
-      return;
-    }
-
     setAuthState((prev) => ({ ...prev, isVerifyingOtp: true, errorCode: null, errorMessage: null }));
 
-    try {
-      await authService.verifyOtp({
-        countryCode: authState.countryCode,
-        phoneNumber: authState.phoneNumber,
-        otpCode: authState.otpCode,
-      });
+    const res = await authService.verifyOtp({
+      countryCode: authState.countryCode,
+      phoneNumber: authState.phoneNumber,
+      otpCode: authState.otpCode,
+    });
 
-      setAuthState((prev) => ({ ...prev, isVerifyingOtp: false, step: 'SUCCESS' }));
+    if (res.success) {
+      setAuthState((prev) => ({ ...prev, isVerifyingOtp: false, step: 'SUCCESS', errorCode: null, errorMessage: null }));
 
-      // Navigate to Phase 2C Onboarding contract
+      // Navigate to Parent Onboarding/Home after successful authentication
       setTimeout(() => {
         if (onNavigate) {
           onNavigate('/parent/onboarding');
         } else {
           window.location.hash = '#/parent/onboarding';
         }
-      }, 1000);
-    } catch {
+      }, 800);
+    } else {
       setAuthState((prev) => ({
         ...prev,
         isVerifyingOtp: false,
-        errorCode: 'SERVER_UNAVAILABLE',
-        errorMessage: 'Verification service error. Please try again.',
+        errorCode: res.errorCode || 'INCORRECT_OTP',
+        errorMessage: res.errorMessage || 'Verification failed. Please check the code and try again.',
       }));
     }
   };
@@ -219,25 +161,27 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
 
     setAuthState((prev) => ({ ...prev, isSendingOtp: true, errorCode: null, errorMessage: null }));
 
-    try {
-      await authService.resendOtp({
-        countryCode: authState.countryCode,
-        phoneNumber: authState.phoneNumber,
-      });
+    const res = await authService.resendOtp({
+      countryCode: authState.countryCode,
+      phoneNumber: authState.phoneNumber,
+    });
 
+    if (res.success) {
       setAuthState((prev) => ({
         ...prev,
         isSendingOtp: false,
-        resendCountdown: 45,
+        resendCountdown: 60,
         canResend: false,
         otpCode: '',
+        errorCode: null,
+        errorMessage: null,
       }));
-    } catch {
+    } else {
       setAuthState((prev) => ({
         ...prev,
         isSendingOtp: false,
-        errorCode: 'SERVER_UNAVAILABLE',
-        errorMessage: 'Unable to resend OTP right now.',
+        errorCode: res.errorCode || 'SERVER_UNAVAILABLE',
+        errorMessage: res.errorMessage || 'Unable to resend code right now.',
       }));
     }
   };
@@ -272,27 +216,6 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
 
       {/* Main Form Container */}
       <main className="max-w-xl w-full mx-auto my-auto py-6 space-y-6">
-        
-        {/* QA Error State Simulator Toggle Bar */}
-        <div className="bg-white p-3 rounded-2xl border border-[#E5E7E5] shadow-care-sm flex items-center justify-between gap-2 text-xs">
-          <span className="font-bold text-[#66736F] flex items-center gap-1">
-            <Sliders className="w-3.5 h-3.5 text-[#16866B]" /> QA Auth Simulator:
-          </span>
-          <select
-            value={qaErrorSim}
-            onChange={(e) => setQaErrorSim(e.target.value as AuthErrorCode | 'NONE')}
-            className="bg-[#FAF7F1] border border-[#CBD5E1] rounded-xl px-2 py-1 font-semibold text-[#1D2926]"
-          >
-            <option value="NONE">Happy Path (Success)</option>
-            <option value="INVALID_PHONE">Error: Invalid Phone</option>
-            <option value="INCORRECT_OTP">Error: Incorrect OTP</option>
-            <option value="EXPIRED_OTP">Error: Expired OTP</option>
-            <option value="TOO_MANY_ATTEMPTS">Error: Too Many Attempts (Locked)</option>
-            <option value="NETWORK_UNAVAILABLE">Error: Network Failure</option>
-            <option value="ACCOUNT_NOT_FOUND">Error: Account Not Found</option>
-            <option value="ACCOUNT_LOCKED">Error: Account Locked</option>
-          </select>
-        </div>
 
         {/* Auth Error Banner */}
         {authState.errorMessage && (
@@ -300,10 +223,10 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
             type={authState.errorCode === 'TOO_MANY_ATTEMPTS' || authState.errorCode === 'ACCOUNT_LOCKED' ? 'critical' : 'warning'}
             title={
               authState.errorCode === 'NETWORK_UNAVAILABLE'
-                ? 'Network Disconnected'
+                ? 'Authentication Disconnected'
                 : authState.errorCode === 'TOO_MANY_ATTEMPTS'
                 ? 'Security Lockout'
-                : 'Sign In Issue'
+                : 'Authentication Issue'
             }
             description={authState.errorMessage}
           />
@@ -344,7 +267,6 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
                 onChange={(e) => setAuthState((prev) => ({ ...prev, phoneNumber: e.target.value, errorCode: null, errorMessage: null }))}
                 inputSize="parent"
                 icon={<Phone className="w-6 h-6 text-[#16866B]" />}
-                disabled={authState.errorCode === 'TOO_MANY_ATTEMPTS' || authState.errorCode === 'ACCOUNT_LOCKED'}
               />
 
               <CareButton
@@ -353,7 +275,7 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
                 size="parent"
                 fullWidth
                 loading={authState.isSendingOtp}
-                disabled={!authState.phoneNumber.trim() || authState.errorCode === 'TOO_MANY_ATTEMPTS'}
+                disabled={!authState.phoneNumber.trim()}
                 icon={<ArrowRight className="w-6 h-6" />}
                 iconPosition="right"
               >
@@ -400,8 +322,7 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
                 length={6}
                 value={authState.otpCode}
                 onChange={(code) => setAuthState((prev) => ({ ...prev, otpCode: code, errorCode: null, errorMessage: null }))}
-                error={authState.errorCode === 'INCORRECT_OTP' || authState.errorCode === 'EXPIRED_OTP' ? authState.errorMessage || undefined : undefined}
-                disabled={authState.errorCode === 'TOO_MANY_ATTEMPTS' || authState.errorCode === 'ACCOUNT_LOCKED'}
+                error={authState.errorCode ? authState.errorMessage || undefined : undefined}
               />
 
               <CareButton
@@ -410,7 +331,7 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
                 size="parent"
                 fullWidth
                 loading={authState.isVerifyingOtp}
-                disabled={authState.otpCode.length < 6 || authState.errorCode === 'TOO_MANY_ATTEMPTS'}
+                disabled={authState.otpCode.length < 6}
                 icon={<CheckCircle2 className="w-6 h-6" />}
               >
                 {authState.isVerifyingOtp ? 'Verifying Code...' : 'Verify & Sign In'}

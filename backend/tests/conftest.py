@@ -3,8 +3,11 @@ import pytest_asyncio
 from typing import AsyncGenerator
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import select
 from app.main import app
 from app.core.database import Base, get_db
+from app.api.deps import get_current_user
+from app.models.user import User
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -33,7 +36,26 @@ async def client(async_db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_db():
         yield async_db
 
+    async def override_get_current_user():
+        result = await async_db.execute(select(User).where(User.id == "usr-demo-1"))
+        user = result.scalars().first()
+        if not user:
+            user = User(
+                id="usr-demo-1",
+                phone="+15552345678",
+                full_name="David Woodson",
+                email="david.woodson@example.com",
+                role="PRIMARY_GUARDIAN",
+                is_active=True,
+                is_verified=True,
+            )
+            async_db.add(user)
+            await async_db.commit()
+            await async_db.refresh(user)
+        return user
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac

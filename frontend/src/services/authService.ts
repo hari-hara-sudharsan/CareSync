@@ -1,10 +1,12 @@
-import type { AuthServiceContract, SendOtpRequest, VerifyOtpRequest, AuthResponse } from '@/types/auth';
+import type { AuthServiceContract, SendOtpRequest, VerifyOtpRequest, AuthResponse, AuthUser } from '@/types/auth';
 import { getApiBaseUrl } from './apiConfig';
 
 /**
  * CareSync Unified Authentication & Session Service
  * 
- * Manages JWT session tokens, active parent context switching, and Bearer Authorization headers.
+ * Real OTP challenge verification, JWT token session management,
+ * and authenticated user context resolution.
+ * NEVER returns fake/offline authentication success when backend is unavailable.
  */
 class CareSyncAuthService implements AuthServiceContract {
   public get baseUrl(): string {
@@ -26,6 +28,12 @@ class CareSyncAuthService implements AuthServiceContract {
   public clearToken(): void {
     localStorage.removeItem('caresync_token');
     sessionStorage.removeItem('caresync_token');
+    localStorage.removeItem('caresync_user');
+  }
+
+  public logout(): void {
+    this.clearToken();
+    console.info('[AuthService] User session destroyed and token cleared.');
   }
 
   public getActiveParentId(): string {
@@ -55,21 +63,30 @@ class CareSyncAuthService implements AuthServiceContract {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: fullPhone }),
       });
-      if (res.ok) {
-        const data = await res.json();
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
         return {
           success: true,
           message: data.message || `Verification code sent to ${fullPhone}`,
         };
       }
-    } catch {
-      console.warn('[AuthService] Backend offline during OTP request.');
-    }
 
-    return {
-      success: true,
-      message: `OTP request registered for ${fullPhone}`,
-    };
+      const errorMessage = data.detail || 'Unable to send verification code. Please check phone number.';
+      return {
+        success: false,
+        errorCode: res.status === 429 ? 'RESEND_COOLDOWN' : 'SERVER_UNAVAILABLE',
+        errorMessage,
+      };
+    } catch (err) {
+      console.error('[AuthService] Backend offline or network error during OTP request:', err);
+      return {
+        success: false,
+        errorCode: 'NETWORK_UNAVAILABLE',
+        errorMessage: 'Unable to connect to CareSync authentication service. Please check your internet connection.',
+      };
+    }
   }
 
   async verifyOtp(req: VerifyOtpRequest): Promise<AuthResponse> {
@@ -82,33 +99,68 @@ class CareSyncAuthService implements AuthServiceContract {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: fullPhone, otp_code: req.otpCode }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.access_token) {
-          this.setToken(data.access_token);
-        }
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.access_token) {
+        this.setToken(data.access_token);
+        const userObj = {
+          id: data.user_id,
+          role: data.role,
+          phone: fullPhone,
+        };
+        localStorage.setItem('caresync_user', JSON.stringify(userObj));
+
         return {
           success: true,
           token: data.access_token,
-          user: {
-            id: data.user_id,
-            role: data.role,
-          },
+          user: userObj,
           message: 'Authentication successful',
         };
       }
-    } catch {
-      console.warn('[AuthService] Backend offline during OTP verification.');
-    }
 
-    return {
-      success: true,
-      message: 'OTP verification successful (offline mode)',
-    };
+      const errorMessage = data.detail || 'Invalid or expired verification code.';
+      return {
+        success: false,
+        errorCode: 'INCORRECT_OTP',
+        errorMessage,
+      };
+    } catch (err) {
+      console.error('[AuthService] Backend offline or network error during OTP verification:', err);
+      return {
+        success: false,
+        errorCode: 'NETWORK_UNAVAILABLE',
+        errorMessage: 'Unable to connect to CareSync authentication service. Verification failed.',
+      };
+    }
   }
 
   async resendOtp(req: SendOtpRequest): Promise<AuthResponse> {
     return this.sendOtp(req);
+  }
+
+  async getMe(): Promise<AuthUser | null> {
+    const token = this.getToken();
+    if (!token) return null;
+
+    try {
+      const res = await fetch(`${this.baseUrl}/auth/me`, {
+        method: 'GET',
+        headers: this.getAuthHeaders(),
+      });
+
+      if (res.ok) {
+        const user: AuthUser = await res.json();
+        localStorage.setItem('caresync_user', JSON.stringify(user));
+        return user;
+      } else {
+        this.clearToken();
+        return null;
+      }
+    } catch {
+      console.warn('[AuthService] Unable to verify current authenticated user with backend.');
+      return null;
+    }
   }
 }
 
