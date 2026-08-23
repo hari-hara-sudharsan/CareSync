@@ -269,8 +269,9 @@ async def accept_care_request(
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-    required_perm = map_category_to_permission(req.category)
-    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+    if req.assigned_to_id != current_user.id:
+        required_perm = map_category_to_permission(req.category)
+        await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
     accepted_req = await CareRequestService.accept_care_request(
         db=db,
@@ -292,8 +293,9 @@ async def start_care_request(
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-    required_perm = map_category_to_permission(req.category)
-    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+    if req.assigned_to_id != current_user.id:
+        required_perm = map_category_to_permission(req.category)
+        await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
     started_req = await CareRequestService.start_care_request(
         db=db,
@@ -316,8 +318,9 @@ async def complete_care_request(
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-    required_perm = map_category_to_permission(req.category)
-    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+    if req.assigned_to_id != current_user.id:
+        required_perm = map_category_to_permission(req.category)
+        await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
     note = payload.completion_note if payload else None
 
@@ -343,8 +346,9 @@ async def decline_care_request(
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-    required_perm = map_category_to_permission(req.category)
-    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+    if req.assigned_to_id != current_user.id:
+        required_perm = map_category_to_permission(req.category)
+        await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
     reason = payload.reason if payload else None
 

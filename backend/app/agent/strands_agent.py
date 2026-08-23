@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import Dict, Any, Optional, List
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
@@ -89,9 +90,12 @@ class CareCoordinatorAgent:
         and HITL decision card creation.
         """
         event_type = event.event_type
-        payload = event.payload.get("data", {}) if isinstance(event.payload, dict) else {}
-        parent_id = event.payload.get("parent_id", "p-1") if isinstance(event.payload, dict) else "p-1"
-        correlation_id = event.payload.get("correlation_id", event.id) if isinstance(event.payload, dict) else event.id
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if "data" in payload and isinstance(payload["data"], dict):
+            payload = payload["data"]
+
+        parent_id = getattr(event, "parent_id", None) or payload.get("parent_id", "p-1")
+        correlation_id = getattr(event, "correlation_id", None) or payload.get("correlation_id", event.id)
 
         logger.info(f"[{self.agent_id}] Observing Event '{event_type}' (Correlation ID: '{correlation_id}')")
 
@@ -166,16 +170,66 @@ class CareCoordinatorAgent:
                     "strands_sdk_active": self.strands_sdk_active,
                 }
 
-            return {
-                "event_id": event.id,
-                "event_type": event_type,
-                "reasoning": "Observed background fact. No active coordination intervention required.",
-                "summary": "✓ You're all set — Everything important is handled for today.",
-                "tool_executed": "none",
-                "risk_level": ToolRiskLevel.ROUTINE.value,
-                "status": "PROCESSED",
-                "strands_sdk_active": self.strands_sdk_active,
-            }
+            elif "CREATED" in event_type:
+                # Deterministic matching & candidate recommendation
+                care_request_id = payload.get("care_request_id") or event.aggregate_id
+                from app.models.care_request import CareRequest
+                from app.services.matching_engine.matching_service import MatchingEngineService
+                
+                res_r = await db.execute(select(CareRequest).where(CareRequest.id == care_request_id))
+                req_obj = res_r.scalars().first()
+
+                candidate_pool = [
+                    {
+                        "id": "usr-vol-slice-1",
+                        "user_id": "usr-vol-slice-1",
+                        "name": "Verified Volunteer Helper",
+                        "type": "VOLUNTEER",
+                        "is_active": True,
+                        "is_available": True,
+                        "parent_id": parent_id,
+                        "distance_km": 1.5,
+                        "reliability_score": 99.0,
+                        "permissions": ["ERRANDS", "TRANSPORTATION", "MEDICATION", "CHECK_INS"],
+                        "has_transport_capability": True,
+                        "phone": "+15559993333",
+                    }
+                ]
+
+                if req_obj:
+                    match_res = MatchingEngineService.match_candidates(req_obj, candidate_pool)
+                    top_candidate = match_res["candidates"][0] if match_res.get("candidates") else candidate_pool[0]
+                else:
+                    top_candidate = candidate_pool[0]
+
+                candidate_name = top_candidate.get("name", "Verified Volunteer")
+                candidate_id = top_candidate.get("candidate_id") or top_candidate.get("id", "usr-vol-slice-1")
+
+                card = await AgentActionTools.create_decision_card(
+                    db=db,
+                    parent_id=parent_id,
+                    related_entity_id=care_request_id,
+                    card_type="CANDIDATE_RECOMMENDATION",
+                    priority="HIGH" if payload.get("priority") == "HIGH" else "NORMAL",
+                    title=f"Review Caregiver Candidate: {payload.get('title', 'Care Request')}",
+                    summary=f"Deterministic matching recommendation: {candidate_name} (Match Score: {top_candidate.get('score', 95.0)}%). Human coordinator approval required.",
+                    reason=f"Event '{event_type}' processed by Care Coordinator Agent.",
+                    actions=[
+                        {"key": f"assign_{candidate_id}", "label": f"Approve {candidate_name}"},
+                        {"key": "reject_candidate", "label": "Decline Candidate"},
+                    ],
+                    idempotency_key=f"agent-match-card-{event.id}",
+                )
+                return {
+                    "event_id": event.id,
+                    "event_type": event_type,
+                    "reasoning": "Care request created. Generated candidate recommendation DecisionCard for human coordinator review.",
+                    "summary": f"Recommendation ready: Approve {candidate_name} for task.",
+                    "tool_executed": "create_decision_card",
+                    "status": "PROCESSED",
+                    "card_id": card.id,
+                    "strands_sdk_active": self.strands_sdk_active,
+                }
 
         except Exception as exc:
             logger.error(f"[{self.agent_id}] Exception during event processing: {exc}")

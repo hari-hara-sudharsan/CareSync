@@ -26,6 +26,7 @@ class AgentActionTools:
         summary: str,
         reason: Optional[str] = None,
         actions: Optional[List[Dict[str, Any]]] = None,
+        related_entity_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> DecisionCard:
         ToolClassifier.validate_action_execution("create_decision_card")
@@ -40,6 +41,7 @@ class AgentActionTools:
 
         card = DecisionCard(
             parent_id=parent_id,
+            related_entity_id=related_entity_id,
             type=card_type,
             priority=priority,
             status="PENDING",

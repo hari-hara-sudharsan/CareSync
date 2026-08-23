@@ -100,9 +100,22 @@ class DecisionService:
                     detail=f"Invalid Operation: Linked CareRequest '{card.related_entity_id}' is already '{linked_req.status}'."
                 )
 
-        # Step 6: Execute Resolution
+        # Step 6: Execute Resolution & Consequential Assignment
         card.status = "RESOLVED"
         now_str = datetime.now(timezone.utc).isoformat()
+
+        if card.related_entity_id and action_key.startswith("assign_"):
+            assignee_id = action_key.replace("assign_", "")
+            from app.services.care_request_service import CareRequestService
+            await CareRequestService.assign_care_request(
+                db=db,
+                request_id=card.related_entity_id,
+                assignee_id=assignee_id,
+                assignee_name="Verified Volunteer",
+                assignee_role="VOLUNTEER",
+                actor_id=current_user.id,
+                actor_name=current_user.full_name,
+            )
 
         # Audit Event Log
         audit = AuditEvent(
