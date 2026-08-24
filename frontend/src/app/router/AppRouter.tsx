@@ -13,9 +13,10 @@ import { FamilyCareRequestsPage } from '@/features/family/requests/FamilyCareReq
 import { VolunteerHomePage } from '@/features/volunteer/VolunteerHomePage';
 import { CoordinatorAdminPage } from '@/features/admin/CoordinatorAdminPage';
 import { DesignSystemPage } from '@/features/admin/DesignSystemPage';
+import { SettingsPage } from '@/features/settings/SettingsPage';
 import { authService } from '@/services/authService';
 import type { AuthUser } from '@/types/auth';
-import { ShieldCheck, UserCheck, LogOut, AlertCircle, RefreshCw } from 'lucide-react';
+import { ShieldCheck, UserCheck, LogOut, AlertCircle, RefreshCw, Settings } from 'lucide-react';
 
 export const AppRouter: React.FC = () => {
   const getInitialPath = () => {
@@ -23,6 +24,7 @@ export const AppRouter: React.FC = () => {
     if (hash) return hash;
     const pathname = window.location.pathname;
     if (pathname === '/design-system') return '/design-system';
+    if (pathname === '/settings') return '/settings';
     if (pathname === '/parent/login') return '/parent/login';
     if (pathname === '/parent/onboarding') return '/parent/onboarding';
     if (pathname === '/parent/home') return '/parent/home';
@@ -172,6 +174,7 @@ export const AppRouter: React.FC = () => {
 
     // 3. Render Authorized Workspace Component
     if (currentPath === '/design-system') return <DesignSystemPage />;
+    if (currentPath === '/settings') return <SettingsPage onNavigate={navigate} />;
     if (currentPath === '/parent/login') return <ParentLoginPage onNavigate={navigate} />;
     if (currentPath === '/parent/onboarding') return <ParentOnboardingPage onNavigate={navigate} />;
     if (currentPath === '/parent/home') return <ParentHomePage onNavigate={navigate} />;
@@ -215,6 +218,16 @@ export const AppRouter: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-3">
+          {currentUser && (
+            <button
+              onClick={() => navigate('/settings')}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-200 border border-slate-700 rounded-lg font-bold hover:bg-slate-700 transition-all focus-care"
+            >
+              <Settings className="w-3.5 h-3.5 text-teal-400" />
+              <span>Settings</span>
+            </button>
+          )}
+
           {currentUser ? (
             <button
               onClick={() => {

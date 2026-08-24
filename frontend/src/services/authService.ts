@@ -44,6 +44,16 @@ class CareSyncAuthService implements AuthServiceContract {
     localStorage.setItem('caresync_active_parent', parentId);
   }
 
+  public getUserFromStorage(): { id?: string; phone?: string; role?: string; full_name?: string; email?: string; is_verified?: boolean } | null {
+    const raw = localStorage.getItem('caresync_user');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
   public getAuthHeaders(): Record<string, string> {
     const token = this.getToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };

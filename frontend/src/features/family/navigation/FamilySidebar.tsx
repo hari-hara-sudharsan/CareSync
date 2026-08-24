@@ -74,7 +74,7 @@ export const FamilySidebar: React.FC<FamilySidebarProps> = ({
       items: [
         { label: 'Care Log & Activity', route: '/family/care-log', icon: <History className="w-5 h-5" />, isSupported: false },
         { label: 'Safety Concerns', route: '/family/concerns', icon: <AlertTriangle className="w-5 h-5" />, isSupported: false },
-        { label: 'Settings', route: '/family/settings', icon: <Settings className="w-5 h-5" />, isSupported: false },
+        { label: 'Settings', route: '/settings', icon: <Settings className="w-5 h-5" />, isSupported: true },
       ],
     },
   ];

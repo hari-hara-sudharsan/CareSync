@@ -42,31 +42,11 @@ class CareSyncDecisionService implements DecisionServiceContract {
           }));
         }
       }
-    } catch {
-      console.warn('[DecisionService] Backend offline during decisions fetch.');
+    } catch (err) {
+      console.warn('[DecisionService] Backend error during decisions fetch:', err);
     }
 
-    return [
-      {
-        id: 'dec-301',
-        type: 'TRANSPORTATION_CONFIRMATION',
-        priority: 'CRITICAL',
-        status: 'PENDING',
-        parentId: pid,
-        parentName: pid === 'p-2' ? 'George Miller' : 'Susan Woodson',
-        title: 'Transportation Unconfirmed for Tomorrow\'s Appointment',
-        summary: 'Mom has a Cardiology appointment tomorrow at 10:30 AM with Dr. Robert Chen. No family driver or volunteer has been assigned yet.',
-        reason: 'CareSync Agent observed that Mom requested transport assistance 2 hours ago.',
-        relatedEntityId: 'apt-201',
-        actions: [
-          { key: 'confirm_family_driver', label: 'I Will Drive Mom (09:45 AM)', variant: 'primary' },
-          { key: 'request_volunteer_fallback', label: 'Assign Verified Volunteer Ride', variant: 'soft' },
-          { key: 'reschedule_appointment', label: 'Reschedule Visit', variant: 'outline' },
-        ],
-        createdAt: '2 hours ago',
-        expiresAt: 'In 3 hours',
-      },
-    ];
+    return [];
   }
 
   async respondToDecision(
