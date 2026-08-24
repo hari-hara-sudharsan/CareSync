@@ -3,28 +3,90 @@ import type {
   ParentHomeServiceContract,
   SubmitCheckInRequest,
 } from '@/types/home';
+import { careRequestService } from './careRequestService';
+import { decisionService } from './decisionService';
 
 /**
- * CareSync Parent Home Read-Model Service Contract
+ * CareSync Parent Home Read-Model Service
  * 
- * Provides typed read-model data structures and interaction contracts.
- * No fake local storage or fake backend execution.
+ * Queries live FastAPI backend endpoints for CareRequests and Decisions.
  */
 class CareSyncParentHomeService implements ParentHomeServiceContract {
   public apiEndpoint = '/api/v1/parents/home';
 
   async getParentHomeData(parentId: string): Promise<ParentHomeReadModel> {
-    console.info(`[ParentHomeService Contract] Fetching read-model for parent ID: ${parentId}`);
+    console.info(`[ParentHomeService] Fetching live read-model for parent ID: ${parentId}`);
 
-    // Realistic typed read-model structure for initial rendering contract
+    let activeCareRequests: ParentHomeReadModel['activeCareRequests'] = [];
+    try {
+      const realReqs = await careRequestService.getCareRequests('parent', parentId);
+      if (Array.isArray(realReqs)) {
+        activeCareRequests = realReqs.map((r) => ({
+          id: r.id,
+          title: r.title,
+          category: ((r.category as string) === 'ERRANDS' ? 'GROCERIES' : r.category) as any,
+          parentId: r.parentId,
+          parentName: r.parentName,
+          description: r.description,
+          status: r.status as any,
+          urgency: r.priority as any,
+          priority: r.priority as any,
+          requestedTime: r.requestedTime || 'Today',
+          createdAt: r.createdAt || 'Just now',
+          dueBy: r.requestedTime || 'Today',
+          assignedTo: r.assignedTo ? {
+            id: r.assignedTo.id,
+            name: r.assignedTo.name,
+            role: (r.assignedTo.role.includes('VOLUNTEER') ? 'VOLUNTEER' : 'FAMILY') as 'FAMILY' | 'VOLUNTEER',
+            assignedAt: 'Recently',
+          } : undefined,
+        }));
+      }
+    } catch (err) {
+      console.warn('[ParentHomeService] Error fetching live care requests:', err);
+    }
+
+    let attentionCards: ParentHomeReadModel['attentionCards'] = [];
+    try {
+      const realDecs = await decisionService.getPendingDecisions('parent', parentId);
+      if (Array.isArray(realDecs)) {
+        attentionCards = realDecs.map((d) => ({
+          id: d.id,
+          type: d.type as any,
+          title: d.title,
+          parentName: d.parentName,
+          description: d.summary,
+          whySurfaced: d.reason || 'Surfaced by CareSync Coordinator Agent',
+          recommendation: d.summary,
+          urgency: d.priority as any,
+          priority: d.priority as any,
+          status: d.status as any,
+          parentId: d.parentId,
+          summary: d.summary,
+          reason: d.reason,
+          actions: d.actions,
+          createdAt: d.createdAt,
+          options: d.actions.map((act) => ({
+            label: act.label,
+            action: act.key,
+            variant: act.key.startsWith('assign_') ? 'primary' : 'outline',
+          })),
+        }));
+      }
+    } catch (err) {
+      console.warn('[ParentHomeService] Error fetching live decision cards:', err);
+    }
+
     return {
       parentId,
-      parentName: 'Susan Woodson',
-      greeting: 'Good morning, Susan',
-      status: 'HANDLED',
-      statusTitle: "✓ You're all set",
-      statusSubtitle: 'Everything important is handled for today. All medications and check-ins are up to date.',
-      lastCheckedTime: '09:04 AM',
+      parentName: parentId === 'p-2' ? 'George Miller' : 'Susan Woodson',
+      greeting: `Good day, ${parentId === 'p-2' ? 'George' : 'Susan'}`,
+      status: activeCareRequests.some(r => r.status === 'PENDING_ASSIGNMENT') ? 'NEEDS_ATTENTION' : 'HANDLED',
+      statusTitle: activeCareRequests.length > 0 ? "Care Active" : "✓ You're all set",
+      statusSubtitle: activeCareRequests.length > 0
+        ? `You have ${activeCareRequests.length} care request(s) being coordinated.`
+        : 'Everything important is handled for today. All medications and check-ins are up to date.',
+      lastCheckedTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       checkInStatus: 'COMPLETED',
       lastCheckInTime: '08:30 AM Today',
       dueMedications: [
@@ -38,7 +100,7 @@ class CareSyncParentHomeService implements ParentHomeServiceContract {
           prescribedBy: 'Dr. Sarah Jenkins',
         },
         {
-          id: 'med-[#med-102]',
+          id: 'med-102',
           name: 'Vitamin D3',
           dosage: '1000 IU Capsule',
           time: '06:00 PM Daily',
@@ -59,41 +121,11 @@ class CareSyncParentHomeService implements ParentHomeServiceContract {
           transportRequired: true,
         },
       ],
-      activeCareRequests: [
-        {
-          id: 'req-301',
-          title: 'Pick up hypertension prescription',
-          category: 'MEDICATION',
-          parentId,
-          parentName: 'Susan Woodson',
-          description: 'Refill Lisinopril from CVS Pharmacy on Main St.',
-          status: 'AWAITING_APPROVAL',
-          urgency: 'MEDIUM',
-          createdAt: '20 mins ago',
-          dueBy: 'Today, 5:00 PM',
-          assignedTo: undefined,
-        },
-      ],
-      attentionCards: [
-        {
-          id: 'dec-401',
-          title: 'Tomorrow\'s Doctor Transport',
-          parentName: 'Susan Woodson',
-          description: 'Your appointment is tomorrow at 10:30 AM with Dr. Robert Chen. Family members are at work.',
-          whySurfaced: 'CareSync matched David (Son) who is available to drive you at 09:45 AM.',
-          recommendation: 'Confirm David for transport to St. Jude Medical Center.',
-          urgency: 'MEDIUM',
-          options: [
-            { label: 'Confirm David', action: 'confirm_david', variant: 'primary' },
-            { label: 'Request Volunteer Ride', action: 'request_volunteer', variant: 'soft' },
-            { label: 'Cancel Ride', action: 'cancel_ride', variant: 'outline' },
-          ],
-          expiresIn: '4 hours',
-        },
-      ],
+      activeCareRequests,
+      attentionCards,
       careTeam: [
         {
-          id: 'mem-[#mem-1]',
+          id: 'mem-1',
           name: 'David Woodson',
           relationship: 'Son',
           phone: '+1 (555) 234-5678',
@@ -111,7 +143,7 @@ class CareSyncParentHomeService implements ParentHomeServiceContract {
           location: '5.0 km away',
         },
         {
-          id: 'mem-[#mem-3]',
+          id: 'mem-3',
           name: 'Priya Sharma',
           relationship: 'Verified Volunteer',
           phone: '+1 (555) 345-6789',
@@ -124,18 +156,18 @@ class CareSyncParentHomeService implements ParentHomeServiceContract {
   }
 
   async acknowledgeMedication(medicationId: string, taken: boolean): Promise<{ success: boolean }> {
-    console.info(`[ParentHomeService Contract] Acknowledging medication ${medicationId} taken=${taken}`);
+    console.info(`[ParentHomeService] Acknowledging medication ${medicationId} taken=${taken}`);
     return { success: true };
   }
 
   async submitCheckIn(req: SubmitCheckInRequest): Promise<{ success: boolean }> {
-    console.info(`[ParentHomeService Contract] Submitting check-in for ${req.parentId}: feeling=${req.feeling}`);
+    console.info(`[ParentHomeService] Submitting check-in for ${req.parentId}: feeling=${req.feeling}`);
     return { success: true };
   }
 
   async respondToDecision(decisionId: string, actionKey: string): Promise<{ success: boolean }> {
-    console.info(`[ParentHomeService Contract] Responding to decision ${decisionId} with action=${actionKey}`);
-    return { success: true };
+    console.info(`[ParentHomeService] Responding to decision ${decisionId} with action=${actionKey}`);
+    return decisionService.respondToDecision(decisionId, actionKey);
   }
 }
 

@@ -20,6 +20,7 @@ import { CareMemberCard } from '@/components/care/CareMemberCard';
 
 // Service & Types
 import { parentHomeService } from '@/services/parentHomeService';
+import { careRequestService } from '@/services/careRequestService';
 import type { ParentHomeReadModel } from '@/types/home';
 import {
   HeartHandshake,
@@ -89,10 +90,51 @@ export const ParentHomePage: React.FC<ParentHomePageProps> = ({ onNavigate }) =>
     }
   };
 
-  const handleDecisionAction = async (decisionId: string, actionKey: string) => {
-    await parentHomeService.respondToDecision(decisionId, actionKey);
-    showToast(`Decision confirmed: ${actionKey.replace(/_/g, ' ')}`);
-    setViewMode('HANDLED');
+  const handleCreateHelpRequest = async (categoryId: string, categoryTitle: string) => {
+    setIsHelpModalOpen(false);
+    try {
+      const catMap: Record<string, any> = {
+        grocery: 'ERRANDS',
+        pharmacy: 'MEDICATION',
+        ride: 'TRANSPORTATION',
+        home: 'COMPANIONSHIP',
+      };
+      await careRequestService.createCareRequest({
+        parentId: 'p-1',
+        category: catMap[categoryId] || 'ERRANDS',
+        title: categoryTitle === 'Grocery Errand' ? 'Groceries Assistance' : categoryTitle,
+        description: `Pick up weekly groceries from Whole Foods market`,
+        priority: 'HIGH',
+        requestedTime: 'Today at 3:00 PM',
+      });
+      showToast(`Help request submitted for ${categoryTitle}! Care Coordinator Agent notified.`);
+      const updated = await parentHomeService.getParentHomeData('p-1');
+      setData(updated);
+    } catch {
+      showToast('Error submitting help request. Please try again.');
+    }
+  };
+
+  const handleConfirmCompletion = async (requestId: string) => {
+    try {
+      await careRequestService.confirmCareRequest(requestId);
+      showToast('Care task completion confirmed ✓ Request is now closed.');
+      const updated = await parentHomeService.getParentHomeData('p-1');
+      setData(updated);
+    } catch {
+      showToast('Error confirming care request completion.');
+    }
+  };
+
+  const handleRespondDecision = async (decisionId: string, actionKey: string) => {
+    try {
+      await parentHomeService.respondToDecision(decisionId, actionKey);
+      showToast(`Decision confirmed: ${actionKey.replace(/_/g, ' ')}`);
+      const updated = await parentHomeService.getParentHomeData('p-1');
+      setData(updated);
+    } catch {
+      showToast('Error responding to decision.');
+    }
   };
 
   return (
@@ -238,7 +280,7 @@ export const ParentHomePage: React.FC<ParentHomePageProps> = ({ onNavigate }) =>
                   <DecisionCard
                     key={dec.id}
                     decision={dec}
-                    onOptionSelect={(id, actionKey) => handleDecisionAction(id, actionKey)}
+                    onOptionSelect={(id, actionKey) => handleRespondDecision(id, actionKey)}
                   />
                 ))}
               </div>
@@ -285,11 +327,26 @@ export const ParentHomePage: React.FC<ParentHomePageProps> = ({ onNavigate }) =>
               <div className="space-y-3">
                 <h3 className="text-2xl font-bold text-[#1D2926]">Active Care Requests</h3>
                 {data.activeCareRequests.map((req) => (
-                  <CareRequestCard
-                    key={req.id}
-                    request={req}
-                    onViewDetails={(id) => showToast(`Viewing details for care request ${id}`)}
-                  />
+                  <div key={req.id} className="space-y-2">
+                    <CareRequestCard
+                      request={req}
+                      onViewDetails={(id) => showToast(`Viewing details for care request ${id}`)}
+                    />
+                    {req.status === 'COMPLETED' && (
+                      <div className="bg-[#E8F4EF] border border-[#16866B]/30 p-3 rounded-2xl flex items-center justify-between">
+                        <span className="text-xs font-bold text-[#16866B]">
+                          Caregiver marked task as complete. Please confirm completion to close.
+                        </span>
+                        <CareButton
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleConfirmCompletion(req.id)}
+                        >
+                          Confirm Completion ✓
+                        </CareButton>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -333,10 +390,7 @@ export const ParentHomePage: React.FC<ParentHomePageProps> = ({ onNavigate }) =>
           ].map((cat) => (
             <button
               key={cat.id}
-              onClick={() => {
-                setIsHelpModalOpen(false);
-                showToast(`Help request submitted for ${cat.title}! Your care team has been notified.`);
-              }}
+              onClick={() => handleCreateHelpRequest(cat.id, cat.title)}
               className="p-4 rounded-2xl border-2 border-[#E5E7E5] hover:border-[#16866B] hover:bg-[#E8F4EF] flex items-center gap-3 text-left transition-all focus-care"
             >
               <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-care-sm">

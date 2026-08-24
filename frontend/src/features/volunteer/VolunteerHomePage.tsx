@@ -22,9 +22,9 @@ export const VolunteerHomePage: React.FC<VolunteerHomePageProps> = ({ onNavigate
   const loadVolunteerTasks = async () => {
     setLoading(true);
     try {
-      const allRequests = await careRequestService.getCareRequests('c-3');
+      const allRequests = await careRequestService.getCareRequests('volunteer', 'p-1');
       const assigned = allRequests.filter(
-        (r) => r.assignedTo?.id === 'c-3' || r.status === 'ASSIGNED' || r.status === 'ACCEPTED' || r.status === 'IN_PROGRESS'
+        (r) => r.assignedTo?.id === 'usr-vol-1' || r.assignedTo?.id === 'c-3' || r.status === 'ASSIGNED' || r.status === 'ACCEPTED' || r.status === 'IN_PROGRESS' || r.status === 'COMPLETED'
       );
       const available = allRequests.filter((r) => r.status === 'PENDING_ASSIGNMENT');
       setAssignedTasks(assigned);

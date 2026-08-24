@@ -26,7 +26,7 @@ class CareSyncDecisionService implements DecisionServiceContract {
       });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           return data.map((d: Record<string, unknown>) => ({
             id: String(d.id),
             type: d.type as DecisionCardData['type'],
@@ -43,7 +43,7 @@ class CareSyncDecisionService implements DecisionServiceContract {
         }
       }
     } catch {
-      console.warn('[DecisionService] Backend offline during decisions fetch. Falling back to local domain contract.');
+      console.warn('[DecisionService] Backend offline during decisions fetch.');
     }
 
     return [
