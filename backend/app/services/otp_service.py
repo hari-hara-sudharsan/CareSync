@@ -1,6 +1,7 @@
 import time
 import secrets
 import logging
+import httpx
 from typing import Optional, Dict, Any, Tuple
 from app.core.redis import get_redis_client
 from app.core.config import settings
@@ -17,17 +18,27 @@ RESEND_COOLDOWN_SECONDS = 60   # 1 minute
 MAX_ATTEMPTS = 5
 
 
+def mask_phone(phone: str) -> str:
+    """Masks phone number digits for privacy in server log outputs."""
+    if not phone or len(phone) < 5:
+        return "*****"
+    clean = "".join(c for c in phone if c.isdigit() or c == "+")
+    if len(clean) <= 6:
+        return clean[:2] + "****" + clean[-1:]
+    return clean[:4] + "****" + clean[-2:]
+
+
 class OtpDeliveryService:
-    """Abstract OTP Delivery Service Interface."""
+    """Abstract OTP Delivery Provider Interface."""
     async def deliver_otp(self, phone: str, otp_code: str) -> bool:
         raise NotImplementedError
 
 
 class DevelopmentOtpDelivery(OtpDeliveryService):
-    """Development / Testing OTP Delivery Sink."""
+    """Development / Testing OTP Delivery Provider (Sink)."""
     async def deliver_otp(self, phone: str, otp_code: str) -> bool:
         _dev_otp_sink[phone] = otp_code
-        logger.info(f"[DevOtpDelivery] Secure OTP generated for {phone}: {otp_code}")
+        logger.info(f"[DevOtpDelivery] Secure OTP generated for {mask_phone(phone)}: [DEV_ONLY]")
         
         r = get_redis_client()
         if r is not None:
@@ -38,16 +49,47 @@ class DevelopmentOtpDelivery(OtpDeliveryService):
         return True
 
 
-class ProductionOtpDelivery(OtpDeliveryService):
-    """Production OTP Delivery Interface (SMS Gateway / AWS SNS)."""
+class TwilioOtpDelivery(OtpDeliveryService):
+    """Production Twilio SMS OTP Delivery Provider."""
     async def deliver_otp(self, phone: str, otp_code: str) -> bool:
-        # Interface ready for Twilio / AWS SNS integration
-        logger.info(f"[ProductionOtpDelivery] Dispatching SMS challenge to {phone}")
-        return True
+        account_sid = getattr(settings, "TWILIO_ACCOUNT_SID", None)
+        auth_token = getattr(settings, "TWILIO_AUTH_TOKEN", None)
+        from_number = getattr(settings, "TWILIO_PHONE_NUMBER", None)
+
+        if not account_sid or not auth_token or not from_number:
+            logger.error(f"[TwilioOtpDelivery] Twilio credentials missing in production environment for {mask_phone(phone)}")
+            raise RuntimeError("Production SMS Gateway misconfigured: missing credentials.")
+
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+        payload = {
+            "From": from_number,
+            "To": phone,
+            "Body": f"Your CareSync verification code is: {otp_code}. Valid for 5 minutes. Do not share this code.",
+        }
+
+        logger.info(f"[TwilioOtpDelivery] Dispatching physical SMS challenge to {mask_phone(phone)}")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(url, data=payload, auth=(account_sid, auth_token))
+            if res.status_code in (200, 201):
+                logger.info(f"[TwilioOtpDelivery] SMS successfully delivered to {mask_phone(phone)}")
+                return True
+            else:
+                logger.error(f"[TwilioOtpDelivery] Twilio API error HTTP {res.status_code} for {mask_phone(phone)}: {res.text}")
+                raise RuntimeError(f"SMS Gateway API returned HTTP {res.status_code}")
+
+
+class ProductionOtpDelivery(OtpDeliveryService):
+    """Production OTP Delivery Router (Twilio / AWS SNS)."""
+    def __init__(self):
+        self.twilio_provider = TwilioOtpDelivery()
+
+    async def deliver_otp(self, phone: str, otp_code: str) -> bool:
+        logger.info(f"[ProductionOtpDelivery] Router dispatching SMS challenge to {mask_phone(phone)}")
+        return await self.twilio_provider.deliver_otp(phone, otp_code)
 
 
 def get_otp_delivery_service() -> OtpDeliveryService:
-    if settings.ENVIRONMENT == "production":
+    if getattr(settings, "ENVIRONMENT", "development") == "production":
         return ProductionOtpDelivery()
     return DevelopmentOtpDelivery()
 
@@ -97,13 +139,18 @@ class OtpService:
             "is_consumed": False,
         }
 
-        await self._save_challenge(clean_phone, challenge)
-
-        # Dispatch via Delivery Service (Logs to dev-otp-sink in dev/test)
+        # Dispatch via Delivery Service (Logs to dev-otp-sink in dev/test, physical SMS in prod)
         delivery_service = get_otp_delivery_service()
-        await delivery_service.deliver_otp(clean_phone, otp_code)
+        try:
+            delivered = await delivery_service.deliver_otp(clean_phone, otp_code)
+            if not delivered:
+                raise RuntimeError("OTP Delivery Service returned failure.")
+        except Exception as exc:
+            logger.error(f"OTP delivery failed for {mask_phone(clean_phone)}: {exc}")
+            return False, "SMS delivery failed. Please verify your phone number and try again.", "SMS_DELIVERY_FAILED"
 
-        return True, f"Verification code sent to {clean_phone}.", None
+        await self._save_challenge(clean_phone, challenge)
+        return True, f"Verification code sent to {mask_phone(clean_phone)}.", None
 
     async def verify_otp(self, phone: str, otp_code: str) -> Tuple[bool, str, Optional[str]]:
         """

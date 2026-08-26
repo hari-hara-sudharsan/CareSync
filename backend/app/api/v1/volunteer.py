@@ -24,7 +24,7 @@ async def get_volunteer_home(
     res_assigned = await db.execute(
         select(CareRequest)
         .where(
-            CareRequest.assigned_volunteer_id == current_user.id,
+            CareRequest.assigned_to_id == current_user.id,
             CareRequest.status.in_(["ASSIGNED", "IN_PROGRESS"])
         )
         .order_by(desc(CareRequest.created_at))
@@ -98,7 +98,7 @@ async def get_volunteer_tasks(
             "priority": t.priority,
             "status": t.status,
             "requested_time": t.requested_time,
-            "assigned_volunteer_id": t.assigned_volunteer_id,
+            "assigned_volunteer_id": t.assigned_to_id,
         }
         for t in tasks
     ]

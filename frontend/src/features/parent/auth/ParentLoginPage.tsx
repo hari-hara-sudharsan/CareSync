@@ -94,13 +94,14 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
     });
 
     if (res.success) {
+      const hint = await authService.getDevOtp(authState.countryCode, cleanPhone);
       setAuthState((prev) => ({
         ...prev,
         step: 'OTP_VERIFICATION',
         isSendingOtp: false,
         resendCountdown: 60,
         canResend: false,
-        otpCode: '',
+        otpCode: hint || '',
         attemptCount: 0,
         errorCode: null,
         errorMessage: null,
@@ -167,12 +168,13 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
     });
 
     if (res.success) {
+      const hint = await authService.getDevOtp(authState.countryCode, authState.phoneNumber.replace(/\D/g, ''));
       setAuthState((prev) => ({
         ...prev,
         isSendingOtp: false,
         resendCountdown: 60,
         canResend: false,
-        otpCode: '',
+        otpCode: hint || '',
         errorCode: null,
         errorMessage: null,
       }));

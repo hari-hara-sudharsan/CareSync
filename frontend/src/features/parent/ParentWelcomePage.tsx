@@ -42,14 +42,7 @@ export const ParentWelcomePage: React.FC<ParentWelcomePageProps> = ({ onNavigate
           </div>
         </div>
 
-        {/* Developer QA shortcut link to /design-system */}
-        <button
-          onClick={() => onNavigate ? onNavigate('/design-system') : (window.location.hash = '#/design-system')}
-          className="text-xs font-semibold text-[#16866B] bg-[#E8F4EF] hover:bg-[#16866B] hover:text-white px-3.5 py-1.5 rounded-full transition-all duration-200 border border-[#16866B]/20 focus-care"
-          title="Open Design System Showcase"
-        >
-          Design System QA
-        </button>
+        {/* Production Header Branding */}
       </header>
 
       {/* Main Hero Container */}

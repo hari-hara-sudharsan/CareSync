@@ -19,7 +19,12 @@ async def request_otp(req: OTPRequest, db: AsyncSession = Depends(get_db)):
     """
     success, message, error_code = await otp_service.request_otp(req.phone)
     if not success:
-        status_code = status.HTTP_429_TOO_MANY_REQUESTS if error_code == "RESEND_COOLDOWN" else status.HTTP_400_BAD_REQUEST
+        if error_code == "RESEND_COOLDOWN":
+            status_code = status.HTTP_429_TOO_MANY_REQUESTS
+        elif error_code == "SMS_DELIVERY_FAILED":
+            status_code = status.HTTP_502_BAD_GATEWAY
+        else:
+            status_code = status.HTTP_400_BAD_REQUEST
         raise HTTPException(status_code=status_code, detail=message)
     
     # Resolve or provision User record

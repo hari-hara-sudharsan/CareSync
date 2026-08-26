@@ -149,6 +149,23 @@ class CareSyncAuthService implements AuthServiceContract {
     return this.sendOtp(req);
   }
 
+  async getDevOtp(countryCode: string, phoneNumber: string): Promise<string | null> {
+    if (import.meta.env.PROD) {
+      return null;
+    }
+    const fullPhone = `${countryCode}${phoneNumber}`;
+    try {
+      const res = await fetch(`${this.baseUrl}/auth/dev-otp-sink?phone=${encodeURIComponent(fullPhone)}`);
+      if (res.ok) {
+        const data = await res.json();
+        return data.dev_otp || null;
+      }
+    } catch (err) {
+      console.warn('[AuthService] Could not fetch dev OTP:', err);
+    }
+    return null;
+  }
+
   async getMe(): Promise<AuthUser | null> {
     const token = this.getToken();
     if (!token) return null;

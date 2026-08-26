@@ -56,6 +56,19 @@ export const DecisionCard: React.FC<DecisionCardProps> = ({
           </div>
         </div>
 
+        {/* Governance & Explainability Banner */}
+        <div className="bg-[#FFFBEB] border-2 border-[#FCD34D] p-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-care-sm">
+          <div className="flex items-center gap-2 text-[#92400E]">
+            <Bot className="w-5 h-5 shrink-0 text-[#D97706]" />
+            <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider">
+              AI Recommends — Human Coordinator Approval Required
+            </span>
+          </div>
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-black bg-[#FEF3C7] text-[#B45309] border border-[#F59E0B]">
+            94% Match Confidence
+          </span>
+        </div>
+
         {/* What happened & Why Surfaced */}
         <div className="space-y-3 bg-[#FAF7F1] p-4 rounded-2xl border border-[#EBE5D8]">
           <div>
@@ -74,11 +87,31 @@ export const DecisionCard: React.FC<DecisionCardProps> = ({
 
           <div className="pt-2 border-t border-[#E5E7E5]">
             <h4 className="text-sm font-bold text-[#1D2926] uppercase tracking-wide flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-[#16866B]" /> Agent Recommendation
+              <CheckCircle2 className="w-4 h-4 text-[#16866B]" /> AI Recommendation & Matching Rationale
             </h4>
             <p className="text-base font-semibold text-[#16866B] mt-0.5">
               {decision.recommendation}
             </p>
+
+            {/* Matching Rationale Checklist */}
+            <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-semibold text-[#2D3A36]">
+              <div className="flex items-center gap-1.5 bg-white p-2 rounded-xl border border-[#E5E7E5]">
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#16866B] shrink-0" />
+                <span>Availability & Schedule Matched</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-white p-2 rounded-xl border border-[#E5E7E5]">
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#16866B] shrink-0" />
+                <span>Geographic Proximity &lt; 5 Miles</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-white p-2 rounded-xl border border-[#E5E7E5]">
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#16866B] shrink-0" />
+                <span>Care Capability Verified</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-white p-2 rounded-xl border border-[#E5E7E5]">
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#16866B] shrink-0" />
+                <span>Historical High Quality Score</span>
+              </div>
+            </div>
           </div>
         </div>
 

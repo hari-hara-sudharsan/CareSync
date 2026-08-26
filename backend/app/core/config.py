@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     WORKER_POLL_INTERVAL_SECONDS: int = int(os.getenv("WORKER_POLL_INTERVAL_SECONDS", "2"))
     AGENT_ENABLED: bool = os.getenv("AGENT_ENABLED", "true").lower() in ("true", "1", "yes")
 
+    # SMS Gateway (Twilio / Production SMS)
+    TWILIO_ACCOUNT_SID: Union[str, None] = os.getenv("TWILIO_ACCOUNT_SID", None)
+    TWILIO_AUTH_TOKEN: Union[str, None] = os.getenv("TWILIO_AUTH_TOKEN", None)
+    TWILIO_PHONE_NUMBER: Union[str, None] = os.getenv("TWILIO_PHONE_NUMBER", None)
+
     # Security & Auth
     JWT_SECRET: str = os.getenv("JWT_SECRET", "caresync-secret-key-change-in-production-2026")
     ALGORITHM: str = "HS256"
