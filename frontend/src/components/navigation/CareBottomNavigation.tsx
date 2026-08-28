@@ -10,8 +10,8 @@ export interface NavItem {
 }
 
 export interface CareBottomNavigationProps {
-  activeTab: string;
-  onTabChange: (tabId: string) => void;
+  activeTab?: string;
+  onTabChange?: (tabId: string) => void;
   items?: NavItem[];
   className?: string;
 }
@@ -32,6 +32,38 @@ export const CareBottomNavigation: React.FC<CareBottomNavigationProps> = ({
 
   const navItems = items || defaultItems;
 
+  const getActiveTabFromHash = (): string => {
+    if (typeof window === 'undefined') return activeTab || 'home';
+    const hash = window.location.hash.replace(/^#/, '');
+    if (hash === '/parent/home' || hash === '/home') return 'home';
+    if (hash === '/parent/care-log' || hash === '/family/requests') return 'care';
+    if (hash === '/admin/dashboard' || hash === '/decisions') return 'decisions';
+    if (hash === '/parent/care-team') return 'team';
+    if (hash === '/parent/check-in') return 'safety';
+    return activeTab || 'home';
+  };
+
+  const currentActive = getActiveTabFromHash();
+
+  const handleItemClick = (tabId: string) => {
+    if (onTabChange) {
+      onTabChange(tabId);
+    }
+
+    const routeMap: Record<string, string> = {
+      home: '/parent/home',
+      care: '/parent/care-log',
+      decisions: '/family/requests',
+      team: '/parent/care-team',
+      safety: '/parent/check-in',
+    };
+
+    const targetRoute = routeMap[tabId];
+    if (targetRoute && typeof window !== 'undefined') {
+      window.location.hash = `#${targetRoute}`;
+    }
+  };
+
   return (
     <nav
       className={cn(
@@ -41,13 +73,13 @@ export const CareBottomNavigation: React.FC<CareBottomNavigationProps> = ({
     >
       <div className="max-w-lg mx-auto flex items-center justify-around">
         {navItems.map((item) => {
-          const isActive = activeTab === item.id;
+          const isActive = currentActive === item.id;
           return (
             <button
               key={item.id}
-              onClick={() => onTabChange(item.id)}
+              onClick={() => handleItemClick(item.id)}
               className={cn(
-                'flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all duration-200 min-w-[64px] min-h-[52px] relative focus-care select-none',
+                'flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all duration-200 min-w-[64px] min-h-[52px] relative focus-care select-none cursor-pointer',
                 isActive
                   ? 'bg-[#E8F4EF] text-[#16866B] font-bold scale-105'
                   : 'text-[#66736F] hover:text-[#1D2926] hover:bg-[#FAF7F1]'
