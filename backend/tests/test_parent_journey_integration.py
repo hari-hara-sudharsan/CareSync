@@ -134,3 +134,50 @@ async def test_invalid_checkin_branch_rejected(async_db: AsyncSession):
         )
     assert exc_info.value.status_code == 400
     assert "Invalid feeling_branch" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_authenticated_parent_onboarding_flow(client: AsyncClient, async_db: AsyncSession):
+    """Verifies that an authenticated parent can complete all onboarding steps and update profile."""
+    from app.core.security import create_access_token
+    user = User(id="usr-onb-test", phone="+15558887777", full_name="New Onboarding User", role="PARENT", is_active=True)
+    async_db.add(user)
+    await async_db.commit()
+
+    token = create_access_token(subject=user.id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Step 1: Save Profile
+    r1 = await client.post("/api/v1/parents/onboarding/profile", json={
+        "preferredName": "Martha",
+        "fullName": "Martha Stewart",
+        "preferredLanguage": "en",
+        "timezone": "America/New_York",
+    }, headers=headers)
+    assert r1.status_code == 200
+    assert r1.json()["success"] is True
+
+    # Step 2: Save Care Situation
+    r2 = await client.post("/api/v1/parents/onboarding/care-situation", json={
+        "careSituation": "FAMILY",
+    }, headers=headers)
+    assert r2.status_code == 200
+    assert r2.json()["success"] is True
+
+    # Step 3: Save Care Preferences
+    r3 = await client.post("/api/v1/parents/onboarding/care-preferences", json={
+        "careNeeds": ["MEDICATION_REMINDERS", "DAILY_CHECK_INS"],
+    }, headers=headers)
+    assert r3.status_code == 200
+    assert r3.json()["success"] is True
+
+    # Step 4: Complete Onboarding
+    r4 = await client.post("/api/v1/parents/onboarding/complete", json={}, headers=headers)
+    assert r4.status_code == 200
+    assert r4.json()["success"] is True
+
+    # Step 5: Verify /auth/me returns updated name
+    r_me = await client.get("/api/v1/auth/me", headers=headers)
+    assert r_me.status_code == 200
+    assert r_me.json()["full_name"] == "Martha Stewart"
+
