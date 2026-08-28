@@ -2,6 +2,28 @@ from pydantic_settings import BaseSettings
 from typing import List, Union
 import os
 
+def get_cors_origins() -> List[str]:
+    defaults = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://localhost:80",
+        "http://localhost",
+    ]
+    raw_env = os.getenv("CORS_ORIGINS")
+    if not raw_env:
+        return defaults
+    if raw_env.startswith("[") and raw_env.endswith("]"):
+        import json
+        try:
+            parsed = json.loads(raw_env)
+            if isinstance(parsed, list):
+                return list(dict.fromkeys(defaults + [str(x).strip() for x in parsed if x]))
+        except Exception:
+            pass
+    custom_list = [x.strip() for x in raw_env.split(",") if x.strip()]
+    return list(dict.fromkeys(defaults + custom_list))
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "CareSync Backend API"
     API_V1_STR: str = "/api/v1"
@@ -31,13 +53,7 @@ class Settings(BaseSettings):
     DEMO_RESET_ENABLED: bool = os.getenv("DEMO_RESET_ENABLED", "true").lower() in ("true", "1", "yes")
     
     # CORS
-    CORS_ORIGINS: List[str] = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://localhost:80",
-        "http://localhost",
-    ]
+    CORS_ORIGINS: List[str] = get_cors_origins()
 
     class Config:
         case_sensitive = True
