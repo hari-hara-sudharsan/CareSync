@@ -91,18 +91,31 @@ class CareCoordinatorAgent:
         """
         event_type = event.event_type
         envelope = event.payload if isinstance(event.payload, dict) else {}
-        payload = envelope
-        if "data" in payload and isinstance(payload["data"], dict):
-            payload = payload["data"]
+        payload = envelope.get("data") if isinstance(envelope.get("data"), dict) else envelope
 
-        parent_id = getattr(event, "parent_id", None) or envelope.get("parent_id") or payload.get("parent_id")
-        if not parent_id:
-            # Resolve the parent from the authoritative CareRequest instead of guessing.
-            from app.models.care_request import CareRequest
-            request_id = payload.get("care_request_id") or getattr(event, "aggregate_id", None)
-            if request_id:
-                res_parent = await db.execute(select(CareRequest.parent_id).where(CareRequest.id == request_id))
-                parent_id = res_parent.scalar()
+        # Parent context comes from the authoritative CareRequest whenever the event references one;
+        # identifiers carried in the event are only used when no CareRequest is linked.
+        from app.models.care_request import CareRequest
+        claimed_parent_id = getattr(event, "parent_id", None) or envelope.get("parent_id") or payload.get("parent_id")
+        request_id = (
+            payload.get("care_request_id")
+            or envelope.get("care_request_id")
+            or envelope.get("aggregate_id")
+            or getattr(event, "aggregate_id", None)
+        )
+        request_parent_id = None
+        if request_id:
+            res_parent = await db.execute(select(CareRequest.parent_id).where(CareRequest.id == request_id))
+            request_parent_id = res_parent.scalar()
+
+        if request_parent_id and claimed_parent_id and request_parent_id != claimed_parent_id:
+            logger.warning(
+                f"[{self.agent_id}] Event '{event.id}' claims parent '{claimed_parent_id}' but CareRequest "
+                f"'{request_id}' belongs to '{request_parent_id}'; no action taken."
+            )
+            parent_id = None
+        else:
+            parent_id = request_parent_id or claimed_parent_id
         if not parent_id:
             logger.warning(f"[{self.agent_id}] Event '{event.id}' has no resolvable parent; no action taken.")
             return {
@@ -190,7 +203,7 @@ class CareCoordinatorAgent:
 
             elif "CREATED" in event_type:
                 # Deterministic matching & candidate recommendation
-                care_request_id = payload.get("care_request_id") or event.aggregate_id
+                care_request_id = request_id
                 from app.models.care_request import CareRequest
                 from app.services.matching_engine.matching_service import MatchingEngineService
                 

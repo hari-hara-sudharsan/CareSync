@@ -5,7 +5,7 @@ from typing import AsyncGenerator, Optional, List, Callable
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.core.authorization import CarePermission, CareRole, verify_care_permission
@@ -158,7 +158,7 @@ async def verify_parent_authorization(
         res_profile = await db.execute(
             select(ParentProfile).where(
                 ParentProfile.user_id == current_user.id,
-                or_(ParentProfile.id == parent_id, ParentProfile.user_id == parent_id),
+                ParentProfile.id == parent_id,
             )
         )
         profile = res_profile.scalars().first()

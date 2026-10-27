@@ -30,6 +30,8 @@ def map_category_to_permission(category: str) -> CarePermission:
         return CarePermission.APPOINTMENTS
     elif "HISTORY" in cat_upper:
         return CarePermission.CARE_HISTORY
+    elif "ERRAND" in cat_upper or "GROCER" in cat_upper or "SHOP" in cat_upper:
+        return CarePermission.ERRANDS
     return CarePermission.CHECK_INS
 
 def verify_care_permission(

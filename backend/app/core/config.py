@@ -1,28 +1,36 @@
-from pydantic_settings import BaseSettings
-from typing import List, Union
+import json
 import os
+from typing import Annotated, List, Union
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode
 
-def get_cors_origins() -> List[str]:
-    defaults = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://localhost:80",
-        "http://localhost",
-    ]
-    raw_env = os.getenv("CORS_ORIGINS")
-    if not raw_env:
-        return defaults
-    if raw_env.startswith("[") and raw_env.endswith("]"):
-        import json
-        try:
-            parsed = json.loads(raw_env)
-            if isinstance(parsed, list):
-                return list(dict.fromkeys(defaults + [str(x).strip() for x in parsed if x]))
-        except Exception:
-            pass
-    custom_list = [x.strip() for x in raw_env.split(",") if x.strip()]
-    return list(dict.fromkeys(defaults + custom_list))
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://localhost:80",
+    "http://localhost",
+]
+
+def parse_cors_origins(raw: Union[str, List[str], None]) -> List[str]:
+    """Accepts a comma-separated string or a JSON list; local development origins are always kept."""
+    if raw is None or raw == "":
+        custom: List[str] = []
+    elif isinstance(raw, list):
+        custom = [str(x).strip() for x in raw if x]
+    else:
+        text = raw.strip()
+        custom = []
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    custom = [str(x).strip() for x in parsed if x]
+            except ValueError:
+                custom = []
+        else:
+            custom = [x.strip() for x in text.split(",") if x.strip()]
+    return list(dict.fromkeys(DEFAULT_CORS_ORIGINS + custom))
 
 DEV_ONLY_JWT_SECRET = "caresync-dev-only-insecure-jwt-secret"
 # Secrets that have appeared in the public repository and must never sign deployed tokens.
@@ -59,7 +67,12 @@ class Settings(BaseSettings):
     DEMO_RESET_ENABLED: bool = os.getenv("DEMO_RESET_ENABLED", "false").lower() in ("true", "1", "yes")
     
     # CORS
-    CORS_ORIGINS: List[str] = get_cors_origins()
+    CORS_ORIGINS: Annotated[List[str], NoDecode] = DEFAULT_CORS_ORIGINS
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value):
+        return parse_cors_origins(value)
 
     @property
     def is_local_environment(self) -> bool:

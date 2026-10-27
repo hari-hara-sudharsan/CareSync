@@ -123,8 +123,6 @@ class DecisionService:
                 db=db,
                 request_id=card.related_entity_id,
                 assignee_id=assignee_id,
-                assignee_name="",
-                assignee_role="",
                 actor_id=current_user.id,
                 actor_name=current_user.full_name,
             )

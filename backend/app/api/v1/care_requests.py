@@ -217,8 +217,6 @@ async def assign_care_request(
         db=db,
         request_id=request_id,
         assignee_id=payload.assignee_id,
-        assignee_name=payload.assignee_name or "",
-        assignee_role=payload.assignee_role or "",
         actor_id=current_user.id,
         actor_name=current_user.full_name,
         idempotency_key=idempotency_key,

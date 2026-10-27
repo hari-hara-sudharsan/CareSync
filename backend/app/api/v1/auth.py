@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
@@ -105,13 +105,19 @@ async def get_me(current_user: User = Depends(get_current_user)):
     """
     return current_user
 
+# Headers added by reverse proxies and tunnels (cloudflared, ngrok, load balancers).
+_PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "cf-connecting-ip", "x-forwarded-host")
+
 @router.get("/dev-otp-sink", summary="Development/Testing OTP Sink (Non-Production Only)")
-async def get_dev_otp_sink(phone: str):
+async def get_dev_otp_sink(phone: str, request: Request):
     """
     Development/Testing sink endpoint to inspect generated OTPs during testing.
     Disabled in production.
     """
-    if not settings.is_local_environment:
+    # Only callable directly on the developer's machine: never through a tunnel or proxy, so a
+    # temporarily exposed local backend cannot leak sign-in codes.
+    proxied = any(h in request.headers for h in _PROXY_HEADERS)
+    if not settings.is_local_environment or proxied:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found.")
     
     otp = await otp_service.get_dev_otp(phone)

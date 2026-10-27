@@ -32,7 +32,8 @@ class HardConstraintFilter:
 
         # 4. Task Permission Check
         granted_permissions: List[str] = candidate.get("permissions", [])
-        accepted = {request.category, map_category_to_permission(request.category).value, "ALL"}
+        # Only the canonical permission for this category (or ALL) qualifies; raw category names do not.
+        accepted = {map_category_to_permission(request.category).value, "ALL"}
         if granted_permissions is not None and len(granted_permissions) > 0:
             if not accepted.intersection(granted_permissions):
                 return False

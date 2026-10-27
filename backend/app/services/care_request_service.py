@@ -217,8 +217,6 @@ class CareRequestService:
         db: AsyncSession,
         request_id: str,
         assignee_id: str,
-        assignee_name: str,
-        assignee_role: str,
         actor_id: str,
         actor_name: str,
         candidate_dto: Optional[Dict[str, Any]] = None,
@@ -267,6 +265,7 @@ class CareRequestService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Ineligible Candidate: Candidate '{candidate['name']}' fails current safety, verification, or permission constraints."
             )
+        # Display metadata is derived from the authoritative record, never from the caller.
         assignee_name = candidate["name"]
         assignee_role = f"{candidate['relationship']} (Family)" if candidate["type"] == "FAMILY" else candidate["relationship"]
 

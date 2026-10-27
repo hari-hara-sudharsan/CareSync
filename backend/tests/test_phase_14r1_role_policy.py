@@ -316,3 +316,68 @@ async def test_demo_reset_requires_admin(http: AsyncClient, world):
     assert (await http.post("/api/v1/demo/reset", headers=auth("u-family"))).status_code == 403
     # Disabled by default even for administrators
     assert (await http.post("/api/v1/demo/reset", headers=auth("u-admin"))).status_code == 403
+
+# --- Review follow-ups ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_parent_user_id_is_not_an_alias_for_profile_id(http: AsyncClient, world):
+    own_profile = await http.get("/api/v1/care-requests", params={"parent_id": "pp-1"}, headers=auth("u-parent"))
+    assert own_profile.status_code == 200
+    user_id_alias = await http.get("/api/v1/care-requests", params={"parent_id": "u-parent"}, headers=auth("u-parent"))
+    assert user_id_alias.status_code == 403
+
+@pytest.mark.asyncio
+async def test_errands_require_errands_permission(http: AsyncClient, db: AsyncSession, world):
+    db.add(User(id="u-checkins-only", phone="+15550100009", full_name="Check-ins Only", role="FAMILY", is_active=True))
+    await db.flush()
+    db.add(CareMember(parent_id="pp-1", user_id="u-checkins-only", name="Check-ins Only", phone="+15550100009",
+                      relationship="Neighbor", role="FAMILY", status="ACTIVE", permissions=["CHECK_INS"]))
+    await db.commit()
+    req = await _pending_request(db, category="ERRANDS", title="Groceries")
+    denied = await http.post(f"/api/v1/care-requests/{req.id}/assign", json={"assignee_id": "u-checkins-only"}, headers=auth("u-parent"))
+    assert denied.status_code == 400
+    # u-family holds TRANSPORTATION and CHECK_INS only, so is likewise ineligible for errands
+    also_denied = await http.post(f"/api/v1/care-requests/{req.id}/assign", json={"assignee_id": "u-family"}, headers=auth("u-parent"))
+    assert also_denied.status_code == 400
+
+@pytest.mark.asyncio
+async def test_raw_category_name_is_not_a_permission(db: AsyncSession, world):
+    from app.services.matching_engine.filters import HardConstraintFilter
+    req = await _pending_request(db, category="PHARMACY")
+    raw = {"id": "x", "type": "FAMILY", "parent_id": "pp-1", "permissions": ["PHARMACY"]}
+    canonical = {"id": "y", "type": "FAMILY", "parent_id": "pp-1", "permissions": ["MEDICATION"]}
+    assert HardConstraintFilter.is_eligible(raw, req, "pp-1") is False
+    assert HardConstraintFilter.is_eligible(canonical, req, "pp-1") is True
+
+@pytest.mark.asyncio
+async def test_agent_uses_care_request_parent_and_rejects_mismatched_claims(db: AsyncSession, world):
+    from app.agent.strands_agent import CareCoordinatorAgent
+    from app.models.outbox import OutboxEvent
+    req = await _pending_request(db)
+    agent = CareCoordinatorAgent()
+
+    spoofed = OutboxEvent(
+        aggregate_type="CareRequest", aggregate_id=req.id, event_type="CARE_REQUEST_CREATED",
+        payload={"parent_id": "some-other-parent", "data": {"care_request_id": req.id}},
+    )
+    db.add(spoofed)
+    await db.commit()
+    assert (await agent.process_event(db, spoofed))["status"] == "NO_ACTION"
+
+    envelope_only = OutboxEvent(
+        aggregate_type="DecisionCard", aggregate_id="unrelated", event_type="CARE_REQUEST_CREATED",
+        payload={"care_request_id": req.id, "data": {"title": "Ride"}},
+    )
+    db.add(envelope_only)
+    await db.commit()
+    result = await agent.process_event(db, envelope_only)
+    assert result["status"] == "PROCESSED"
+
+@pytest.mark.asyncio
+async def test_dev_otp_sink_refuses_tunnelled_requests(http: AsyncClient):
+    await http.post("/api/v1/auth/request-otp", json={"phone": "+15550200008"})
+    direct = await http.get("/api/v1/auth/dev-otp-sink", params={"phone": "+15550200008"})
+    assert direct.status_code == 200
+    tunnelled = await http.get("/api/v1/auth/dev-otp-sink", params={"phone": "+15550200008"},
+                               headers={"X-Forwarded-For": "203.0.113.7"})
+    assert tunnelled.status_code == 404
