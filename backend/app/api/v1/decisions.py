@@ -16,7 +16,7 @@ class DecisionResolveSchema(BaseModel):
 
 @router.get("", summary="Get Pending Decision Cards for Active Parent")
 async def get_decisions(
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

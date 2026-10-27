@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from app.models.care_request import CareRequest
+from app.core.authorization import map_category_to_permission
 
 class HardConstraintFilter:
     """
@@ -31,9 +32,9 @@ class HardConstraintFilter:
 
         # 4. Task Permission Check
         granted_permissions: List[str] = candidate.get("permissions", [])
-        required_permission = request.category
+        accepted = {request.category, map_category_to_permission(request.category).value, "ALL"}
         if granted_permissions is not None and len(granted_permissions) > 0:
-            if required_permission not in granted_permissions and "ALL" not in granted_permissions:
+            if not accepted.intersection(granted_permissions):
                 return False
 
         # 5. Availability Check

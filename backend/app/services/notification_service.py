@@ -89,7 +89,10 @@ class NotificationService:
     ) -> Optional[NotificationRecord]:
         payload = event.payload.get("data", {}) if isinstance(event.payload, dict) else {}
         event_type = event.event_type
-        parent_id = event.payload.get("parent_id", "p-1") if isinstance(event.payload, dict) else "p-1"
+        parent_id = event.payload.get("parent_id") if isinstance(event.payload, dict) else None
+        if not parent_id:
+            logger.warning(f"Outbox event {event.id} has no parent_id; notification not routed.")
+            return None
 
         if "ESCALATED" in event_type or "FAILED" in event_type or "TIMEOUT" in event_type:
             return await self.adapter.send_notification(

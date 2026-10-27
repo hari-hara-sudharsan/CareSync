@@ -3,6 +3,7 @@ import time
 from sqlalchemy import select
 from app.main import app
 from app.api.deps import get_current_user
+from app.models.parent import ParentProfile
 from app.models.user import User
 from app.models.decision import DecisionCard
 from app.models.notification import NotificationRecord
@@ -127,6 +128,7 @@ async def test_ai_governance_thesis_human_approval_required(client, async_db):
         existing_p = await async_db.execute(select(User).where(User.id == "p-1"))
         if not existing_p.scalars().first():
             async_db.add(parent)
+            async_db.add(ParentProfile(id="p-1", user_id="p-1", full_name="Governance Parent"))
         async_db.add_all([admin, vol])
         await async_db.commit()
         await async_db.refresh(admin)

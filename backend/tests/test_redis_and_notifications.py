@@ -6,6 +6,7 @@ from unittest.mock import patch
 from app.models.care_request import CareRequest
 from app.models.outbox import OutboxEvent
 from app.models.notification import NotificationRecord
+from app.models.care_network import CareMember
 from app.models.user import User
 from app.core.redis import check_redis_health, publish_redis_event
 from app.services.care_request_service import CareRequestService
@@ -29,7 +30,12 @@ async def test_redis_offline_fallback_preserves_outbox(async_db: AsyncSession):
     CRITICAL INVARIANT: Domain mutation and PostgreSQL Outbox insertion MUST succeed,
     and outbox event MUST remain durable in database. Redis failure NEVER breaks CareSync domain.
     """
-    user = User(id="usr-pj-1", phone="+15551234567", full_name="Susan Woodson", role="PARENT", is_active=True)
+    # The assigned caregiver is an active family member of the parent's Care Circle.
+    user = User(id="usr-fam-outbox", phone="+15551234567", full_name="David Woodson", role="FAMILY", is_active=True)
+    membership = CareMember(
+        parent_id="p-1", user_id="usr-fam-outbox", name="David Woodson", phone="+15551234567",
+        relationship="Son", role="FAMILY", status="ACTIVE", permissions=["ALL"],
+    )
     req = CareRequest(
         parent_id="p-1",
         category="TRANSPORTATION",
@@ -37,10 +43,10 @@ async def test_redis_offline_fallback_preserves_outbox(async_db: AsyncSession):
         description="Testing domain safety when redis is down",
         priority="HIGH",
         status="IN_PROGRESS",
-        assigned_to_id="usr-pj-1",
+        assigned_to_id="usr-fam-outbox",
         requested_time="Today",
     )
-    async_db.add_all([user, req])
+    async_db.add_all([user, membership, req])
     await async_db.commit()
 
     # Mock Redis publish to raise connection error

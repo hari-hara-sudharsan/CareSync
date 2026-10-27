@@ -3,12 +3,11 @@ import { getApiBaseUrl } from './apiConfig';
 
 /**
  * CareSync Unified Authentication & Session Service
- * 
+ *
  * Real OTP challenge verification, JWT token session management,
- * and authenticated user context resolution.
- * Supports static deployment fallback mode for seamless QA testing on Vercel.
+ * and authenticated user context resolution. There is no offline or preview
+ * fallback: a session exists only when the backend has issued and accepted a token.
  */
-const _devOtpMap = new Map<string, string>();
 
 class CareSyncAuthService implements AuthServiceContract {
   public get baseUrl(): string {
@@ -39,7 +38,7 @@ class CareSyncAuthService implements AuthServiceContract {
   }
 
   public getActiveParentId(): string {
-    return localStorage.getItem('caresync_active_parent') || 'p-1';
+    return localStorage.getItem('caresync_active_parent') || '';
   }
 
   public setActiveParentId(parentId: string): void {
@@ -65,17 +64,27 @@ class CareSyncAuthService implements AuthServiceContract {
     return headers;
   }
 
-  private getRoleFromPhone(phone: string): string {
-    if (phone.includes('0000002')) return 'FAMILY';
-    if (phone.includes('0000003')) return 'VOLUNTEER';
-    if (phone.includes('0000004')) return 'COORDINATOR';
-    if (phone.includes('0000005')) return 'ADMIN';
-    return 'PARENT';
+  /**
+   * Turns a failed response into an honest error. A missing backend (static hosting serving
+   * index.html, 404/405) is reported as unavailable rather than treated as a successful login.
+   */
+  private describeFailure(res: Response, data: { detail?: unknown }, fallback: string): AuthResponse {
+    const isJson = (res.headers.get('content-type') || '').includes('application/json');
+    if (!isJson || res.status === 404 || res.status === 405 || res.status >= 500) {
+      return {
+        success: false,
+        errorCode: 'SERVER_UNAVAILABLE',
+        errorMessage: 'The CareSync sign-in service is not reachable from this deployment. Please try again later.',
+      };
+    }
+    if (res.status === 429) {
+      return { success: false, errorCode: 'RESEND_COOLDOWN', errorMessage: typeof data.detail === 'string' ? data.detail : fallback };
+    }
+    return { success: false, errorCode: 'INCORRECT_OTP', errorMessage: typeof data.detail === 'string' ? data.detail : fallback };
   }
 
   async sendOtp(req: SendOtpRequest): Promise<AuthResponse> {
     const fullPhone = `${req.countryCode}${req.phoneNumber}`;
-    console.info(`[AuthService] Requesting OTP send for ${fullPhone}`);
 
     try {
       const res = await fetch(`${this.baseUrl}/auth/request-otp`, {
@@ -83,128 +92,51 @@ class CareSyncAuthService implements AuthServiceContract {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: fullPhone }),
       });
-
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data.success) {
-        return {
-          success: true,
-          message: data.message || `Verification code sent to ${fullPhone}`,
-        };
+        return { success: true, message: data.message || `Verification code sent to ${fullPhone}` };
       }
-
-      // Static preview fallback when deployed without backend proxy
-      if (res.status === 404 || !res.ok) {
-        console.warn(`[AuthService] Backend auth returned ${res.status}. Operating in static preview OTP mode.`);
-        _devOtpMap.set(fullPhone, '604977');
-        return {
-          success: true,
-          message: `Verification code sent to ${fullPhone}`,
-        };
-      }
-
-      const errorMessage = data.detail || 'Unable to send verification code. Please check phone number.';
+      const failure = this.describeFailure(res, data, 'Unable to send verification code. Please check the phone number.');
+      if (failure.errorCode === 'INCORRECT_OTP') failure.errorCode = 'INVALID_PHONE';
+      return failure;
+    } catch {
       return {
         success: false,
-        errorCode: res.status === 429 ? 'RESEND_COOLDOWN' : 'SERVER_UNAVAILABLE',
-        errorMessage,
-      };
-    } catch (err) {
-      console.warn('[AuthService] Backend network error during OTP request. Operating in static preview OTP mode:', err);
-      _devOtpMap.set(fullPhone, '604977');
-      return {
-        success: true,
-        message: `Verification code sent to ${fullPhone}`,
+        errorCode: 'NETWORK_UNAVAILABLE',
+        errorMessage: 'Unable to connect to the CareSync sign-in service. Check your connection and try again.',
       };
     }
   }
 
   async verifyOtp(req: VerifyOtpRequest): Promise<AuthResponse> {
     const fullPhone = `${req.countryCode}${req.phoneNumber}`;
-    console.info(`[AuthService] Verifying OTP for ${fullPhone}`);
 
     try {
       const res = await fetch(`${this.baseUrl}/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: fullPhone, otp_code: req.otpCode }),
+        body: JSON.stringify({
+          phone: fullPhone,
+          otp_code: req.otpCode,
+          // Only used by the backend when this sign-in creates a new account.
+          ...(req.requestedRole ? { requested_role: req.requestedRole } : {}),
+        }),
       });
-
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data.access_token) {
         this.setToken(data.access_token);
-        const userObj = {
-          id: data.user_id,
-          role: data.role,
-          phone: fullPhone,
-        };
+        const userObj = { id: data.user_id, role: data.role, phone: fullPhone };
         localStorage.setItem('caresync_user', JSON.stringify(userObj));
-
-        return {
-          success: true,
-          token: data.access_token,
-          user: userObj,
-          message: 'Authentication successful',
-        };
+        return { success: true, token: data.access_token, user: userObj, message: 'Authentication successful' };
       }
-
-      // Static preview mode fallback
-      const devCode = _devOtpMap.get(fullPhone) || '604977';
-      if ((res.status === 404 || !res.ok) && (req.otpCode === devCode || req.otpCode === '604977' || req.otpCode === '123456')) {
-        const dummyToken = `dev-token-${Date.now()}`;
-        this.setToken(dummyToken);
-        const role = this.getRoleFromPhone(fullPhone);
-        const userObj = {
-          id: `dev-usr-${Date.now()}`,
-          full_name: 'CareSync User',
-          phone: fullPhone,
-          role,
-          is_active: true,
-          is_verified: true,
-        };
-        localStorage.setItem('caresync_user', JSON.stringify(userObj));
-        return {
-          success: true,
-          token: dummyToken,
-          user: userObj,
-          message: 'Authentication successful (Preview Mode)',
-        };
-      }
-
-      const errorMessage = data.detail || 'Invalid or expired verification code.';
-      return {
-        success: false,
-        errorCode: 'INCORRECT_OTP',
-        errorMessage,
-      };
-    } catch (err) {
-      console.warn('[AuthService] Backend network error during OTP verification. Checking dev code:', err);
-      if (req.otpCode === '604977' || req.otpCode === '123456' || _devOtpMap.get(fullPhone) === req.otpCode) {
-        const dummyToken = `dev-token-${Date.now()}`;
-        this.setToken(dummyToken);
-        const role = this.getRoleFromPhone(fullPhone);
-        const userObj = {
-          id: `dev-usr-${Date.now()}`,
-          full_name: 'CareSync User',
-          phone: fullPhone,
-          role,
-          is_active: true,
-          is_verified: true,
-        };
-        localStorage.setItem('caresync_user', JSON.stringify(userObj));
-        return {
-          success: true,
-          token: dummyToken,
-          user: userObj,
-          message: 'Authentication successful (Preview Mode)',
-        };
-      }
-
+      return this.describeFailure(res, data, 'Invalid or expired verification code.');
+    } catch {
       return {
         success: false,
         errorCode: 'NETWORK_UNAVAILABLE',
-        errorMessage: 'Unable to connect to CareSync authentication service. Verification failed.',
+        errorMessage: 'Unable to connect to the CareSync sign-in service. Verification failed.',
       };
     }
   }
@@ -213,7 +145,12 @@ class CareSyncAuthService implements AuthServiceContract {
     return this.sendOtp(req);
   }
 
+  /**
+   * Local development helper: reads the code from the backend's dev OTP sink.
+   * Compiled out of production builds; the backend also hides the sink outside local environments.
+   */
   async getDevOtp(countryCode: string, phoneNumber: string): Promise<string | null> {
+    if (!import.meta.env.DEV) return null;
     const fullPhone = `${countryCode}${phoneNumber}`;
     try {
       const res = await fetch(`${this.baseUrl}/auth/dev-otp-sink?phone=${encodeURIComponent(fullPhone)}`);
@@ -221,12 +158,13 @@ class CareSyncAuthService implements AuthServiceContract {
         const data = await res.json();
         return data.dev_otp || null;
       }
-    } catch (err) {
-      console.warn('[AuthService] Could not fetch dev OTP from backend:', err);
+    } catch {
+      // Dev sink unavailable; the user types the code manually.
     }
-    return _devOtpMap.get(fullPhone) || '604977';
+    return null;
   }
 
+  /** Resolves identity only from the backend. Without a reachable backend there is no session. */
   async getMe(): Promise<AuthUser | null> {
     const token = this.getToken();
     if (!token) return null;
@@ -236,42 +174,16 @@ class CareSyncAuthService implements AuthServiceContract {
         method: 'GET',
         headers: this.getAuthHeaders(),
       });
-
       if (res.ok) {
         const user: AuthUser = await res.json();
         localStorage.setItem('caresync_user', JSON.stringify(user));
         return user;
-      } else if (res.status === 404) {
-        // Static preview mode fallback
-        const stored = this.getUserFromStorage();
-        if (stored && stored.id) {
-          return {
-            id: stored.id,
-            phone: stored.phone || '+15550000001',
-            full_name: stored.full_name || 'CareSync User',
-            role: stored.role || 'PARENT',
-            is_active: true,
-            is_verified: true,
-          };
-        }
-        return null;
-      } else {
+      }
+      if (res.status === 401 || res.status === 403) {
         this.clearToken();
-        return null;
       }
+      return null;
     } catch {
-      console.warn('[AuthService] Backend offline. Resolving session from storage.');
-      const stored = this.getUserFromStorage();
-      if (stored && stored.id) {
-        return {
-          id: stored.id,
-          phone: stored.phone || '+15550000001',
-          full_name: stored.full_name || 'CareSync User',
-          role: stored.role || 'PARENT',
-          is_active: true,
-          is_verified: true,
-        };
-      }
       return null;
     }
   }

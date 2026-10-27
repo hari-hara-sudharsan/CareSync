@@ -75,7 +75,11 @@ def test_abac_permission_verification():
 @pytest.mark.asyncio
 async def test_parent_context_switcher_authorization_boundary(async_db: AsyncSession):
     """Verifies changing active parent context re-evaluates authorization boundaries."""
-    demo_user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="PRIMARY_GUARDIAN", is_active=True)
+    demo_user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="FAMILY", is_active=True)
+    cm1 = CareMember(parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="PRIMARY_GUARDIAN", role="PRIMARY_GUARDIAN", status="ACTIVE", permissions=["CHECK_INS", "ALL"])
+    cm2 = CareMember(parent_id="p-2", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="PRIMARY_GUARDIAN", role="PRIMARY_GUARDIAN", status="ACTIVE", permissions=["CHECK_INS", "ALL"])
+    async_db.add_all([demo_user, cm1, cm2])
+    await async_db.commit()
 
     # Context 1: Susan Woodson (p-1) -> Allowed
     m1 = await verify_parent_authorization("p-1", CarePermission.CHECK_INS, async_db, demo_user)

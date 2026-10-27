@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("/home", summary="Get Family Caregiver Workspace Read Model")
 async def get_family_home_read_model(
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -31,7 +31,7 @@ async def get_family_home_read_model(
     res_parent = await db.execute(select(ParentProfile).where(ParentProfile.id == parent_id))
     parent = res_parent.scalars().first()
     
-    parent_name = parent.full_name if parent else ("Susan Woodson" if parent_id == "p-1" else "George Miller")
+    parent_name = parent.full_name if parent else "Parent"
 
     # Fetch Pending Decision Cards
     res_decisions = await db.execute(

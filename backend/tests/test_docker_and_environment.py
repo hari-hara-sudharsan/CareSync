@@ -7,6 +7,7 @@ from unittest.mock import patch
 from app.models.care_request import CareRequest
 from app.models.outbox import OutboxEvent, ProcessedEvent
 from app.models.decision import DecisionCard
+from app.models.care_network import CareMember
 from app.models.user import User
 from app.core.config import Settings
 from app.services.care_request_service import CareRequestService
@@ -61,7 +62,12 @@ async def test_end_to_end_event_to_agent_flow(async_db: AsyncSession):
     Scenario: Complete end-to-end event-driven architecture pipeline.
     Domain Command -> PostgreSQL Outbox -> Worker -> Redis Transport -> Agent Consumer -> DecisionCard.
     """
-    user = User(id="usr-pj-1", phone="+15551234567", full_name="Susan Woodson", role="PARENT", is_active=True)
+    # The assigned caregiver is an active family member of the parent's Care Circle.
+    user = User(id="usr-fam-e2e", phone="+15551234567", full_name="David Woodson", role="FAMILY", is_active=True)
+    membership = CareMember(
+        parent_id="p-1", user_id="usr-fam-e2e", name="David Woodson", phone="+15551234567",
+        relationship="Son", role="FAMILY", status="ACTIVE", permissions=["TRANSPORTATION"],
+    )
     req = CareRequest(
         parent_id="p-1",
         category="TRANSPORTATION",
@@ -69,10 +75,10 @@ async def test_end_to_end_event_to_agent_flow(async_db: AsyncSession):
         description="Testing complete architecture flow",
         priority="HIGH",
         status="IN_PROGRESS",
-        assigned_to_id="usr-pj-1",
+        assigned_to_id="usr-fam-e2e",
         requested_time="Today",
     )
-    async_db.add_all([user, req])
+    async_db.add_all([user, membership, req])
     await async_db.commit()
 
     # Step 1: Execute Domain Mutation -> Generates OutboxEvent

@@ -151,16 +151,9 @@ export const FamilySidebar: React.FC<FamilySidebarProps> = ({
       <div className="p-4 border-t border-[#E5E7E5] bg-[#FAF7F1]">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5 text-left">
-            <p className="text-sm font-extrabold text-[#1D2926]">David Woodson</p>
-            <p className="text-xs text-[#66736F]">Primary Care Guardian</p>
+            <p className="text-sm font-extrabold text-[#1D2926]">Caregiver Context</p>
+            <p className="text-xs text-[#66736F]">Family Operational Workspace</p>
           </div>
-          <button
-            onClick={() => handleNav('/parent/home', true)}
-            className="text-xs font-bold text-[#16866B] hover:underline"
-            title="Switch to Parent View"
-          >
-            Parent View
-          </button>
         </div>
       </div>
     </aside>

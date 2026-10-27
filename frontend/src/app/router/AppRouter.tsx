@@ -36,6 +36,7 @@ export const AppRouter: React.FC = () => {
     if (pathname === '/family/home') return '/family/home';
     if (pathname === '/family/requests') return '/family/requests';
     if (pathname === '/volunteer/home') return '/volunteer/home';
+    if (pathname === '/coordinator/dashboard') return '/coordinator/dashboard';
     if (pathname === '/admin/dashboard') return '/admin/dashboard';
     return '/parent/welcome';
   };
@@ -93,38 +94,46 @@ export const AppRouter: React.FC = () => {
     return path === '/parent/welcome' || path === '/parent/login' || path === '/design-system';
   };
 
-  // Authoritative Role Workspace Routing & Access Policy
+  // Authoritative Role Workspace Routing & Access Policy (Strict 1:1 Role-Workspace Binding)
   const isRouteAuthorizedForRole = (path: string, user: AuthUser | null): boolean => {
     if (isPublicRoute(path)) return true;
     if (!user) return false;
 
     const role = (user.role || 'FAMILY').toUpperCase();
-    if (role === 'ADMIN' || role === 'COORDINATOR') return true;
 
     if (path.startsWith('/parent/')) {
-      return role === 'PARENT' || role === 'PRIMARY_GUARDIAN' || role === 'FAMILY';
+      return role === 'PARENT';
     }
 
     if (path.startsWith('/family/')) {
-      return role === 'FAMILY' || role === 'PRIMARY_GUARDIAN' || role === 'PARENT';
+      return role === 'FAMILY';
     }
 
     if (path.startsWith('/volunteer/')) {
       return role === 'VOLUNTEER';
     }
 
-    if (path.startsWith('/admin/')) {
-      return role === 'ADMIN' || role === 'COORDINATOR';
+    if (path.startsWith('/coordinator/')) {
+      return role === 'COORDINATOR';
     }
 
-    return true;
+    if (path.startsWith('/admin/')) {
+      return role === 'ADMIN';
+    }
+
+    if (path === '/settings') {
+      return true;
+    }
+
+    return false;
   };
 
   const getDefaultWorkspaceForRole = (user: AuthUser): string => {
     const role = (user.role || 'FAMILY').toUpperCase();
-    if (role === 'PARENT' || role === 'PRIMARY_GUARDIAN') return '/parent/home';
+    if (role === 'PARENT') return '/parent/home';
     if (role === 'VOLUNTEER') return '/volunteer/home';
-    if (role === 'ADMIN' || role === 'COORDINATOR') return '/admin/dashboard';
+    if (role === 'COORDINATOR') return '/coordinator/dashboard';
+    if (role === 'ADMIN') return '/admin/dashboard';
     return '/family/home';
   };
 
@@ -186,6 +195,8 @@ export const AppRouter: React.FC = () => {
     if (currentPath === '/family/home') return <FamilyHomePage onNavigate={navigate} />;
     if (currentPath === '/family/requests') return <FamilyCareRequestsPage onNavigate={navigate} />;
     if (currentPath === '/volunteer/home') return <VolunteerHomePage onNavigate={navigate} />;
+    // Coordinator and Admin are separate, role-bound routes; dedicated consoles arrive in 14R.5 / 14R.6.
+    if (currentPath === '/coordinator/dashboard') return <CoordinatorAdminPage onNavigate={navigate} />;
     if (currentPath === '/admin/dashboard') return <CoordinatorAdminPage onNavigate={navigate} />;
     return <ParentWelcomePage onNavigate={navigate} />;
   };

@@ -20,11 +20,7 @@ async def get_user_notifications(
     """
     res = await db.execute(
         select(NotificationRecord)
-        .where(
-            (NotificationRecord.recipient_id == current_user.id) |
-            (NotificationRecord.recipient_id == "usr-demo-1") |
-            (NotificationRecord.recipient_id == "p-1")
-        )
+        .where(NotificationRecord.recipient_id == current_user.id)
         .order_by(desc(NotificationRecord.created_at))
         .limit(20)
     )

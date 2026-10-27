@@ -20,6 +20,18 @@ class CareRole(str, Enum):
     VOLUNTEER = "VOLUNTEER"
     ADMIN = "ADMIN"
 
+def map_category_to_permission(category: str) -> CarePermission:
+    cat_upper = category.upper() if category else ""
+    if "TRANSPORT" in cat_upper:
+        return CarePermission.TRANSPORTATION
+    elif "MED" in cat_upper or "PHARM" in cat_upper:
+        return CarePermission.MEDICATION
+    elif "APPOINT" in cat_upper:
+        return CarePermission.APPOINTMENTS
+    elif "HISTORY" in cat_upper:
+        return CarePermission.CARE_HISTORY
+    return CarePermission.CHECK_INS
+
 def verify_care_permission(
     required_permission: CarePermission,
     user_role: CareRole,

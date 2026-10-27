@@ -42,10 +42,14 @@ export interface SendOtpRequest {
   phoneNumber: string;
 }
 
+/** Roles a person may choose at public signup. Coordinator and Admin are granted by administrators only. */
+export type SelfSelectableRole = 'PARENT' | 'FAMILY' | 'VOLUNTEER';
+
 export interface VerifyOtpRequest {
   countryCode: string;
   phoneNumber: string;
   otpCode: string;
+  requestedRole?: SelfSelectableRole;
 }
 
 export interface AuthResponse {

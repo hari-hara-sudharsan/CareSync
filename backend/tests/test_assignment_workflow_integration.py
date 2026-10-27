@@ -286,7 +286,8 @@ async def test_idempotent_duplicate_assignment(async_db: AsyncSession):
         status="PENDING_ASSIGNMENT",
         requested_time="Today",
     )
-    async_db.add_all([user, req])
+    # Assignee c-1 is a real active circle member of p-1.
+    async_db.add_all([user, req, User(id="c-1", phone="+15553330001", full_name="David Woodson", role="FAMILY", is_active=True), CareMember(parent_id="p-1", user_id="c-1", name="David Woodson", phone="+15553330001", relationship="Son", role="FAMILY", status="ACTIVE", permissions=["ALL"])])
     await async_db.commit()
 
     idemp_key = "idemp_assign_key_777"
@@ -326,7 +327,8 @@ async def test_stale_decision_card_action_cannot_mutate_closed_request(async_db:
     Scenario: Decision card is linked to a CareRequest that has become CLOSED.
     Verifies resolving decision card on closed request raises HTTP 400 Bad Request.
     """
-    user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="PRIMARY_GUARDIAN", is_active=True)
+    user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="FAMILY", is_active=True)
+    cm = CareMember(parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="PRIMARY_GUARDIAN", role="PRIMARY_GUARDIAN", status="ACTIVE", permissions=["ALL"])
     req = CareRequest(
         parent_id="p-1",
         category="TRANSPORTATION",
@@ -336,7 +338,7 @@ async def test_stale_decision_card_action_cannot_mutate_closed_request(async_db:
         status="CLOSED",
         requested_time="Yesterday",
     )
-    async_db.add(req)
+    async_db.add_all([user, cm, req])
     await async_db.flush()
 
     card = DecisionCard(

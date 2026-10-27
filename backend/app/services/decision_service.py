@@ -100,6 +100,18 @@ class DecisionService:
                     detail=f"Invalid Operation: Linked CareRequest '{card.related_entity_id}' is already '{linked_req.status}'."
                 )
 
+        # Step 5b: Only actions the card actually offered can be executed
+        offered_keys = {
+            a.get("key") or a.get("action")
+            for a in (card.actions or [])
+            if isinstance(a, dict) and (a.get("key") or a.get("action"))
+        }
+        if offered_keys and action_key not in offered_keys:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid Operation: Action '{action_key}' is not offered by DecisionCard '{card_id}'."
+            )
+
         # Step 6: Execute Resolution & Consequential Assignment
         card.status = "RESOLVED"
         now_str = datetime.now(timezone.utc).isoformat()
@@ -111,8 +123,8 @@ class DecisionService:
                 db=db,
                 request_id=card.related_entity_id,
                 assignee_id=assignee_id,
-                assignee_name="Verified Volunteer",
-                assignee_role="VOLUNTEER",
+                assignee_name="",
+                assignee_role="",
                 actor_id=current_user.id,
                 actor_name=current_user.full_name,
             )

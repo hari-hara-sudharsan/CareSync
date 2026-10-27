@@ -7,7 +7,7 @@ import { CareOTPInput } from '@/components/ui/CareOTPInput';
 import { CareInlineAlert } from '@/components/feedback/CareInlineAlert';
 import { CareModal } from '@/components/feedback/CareModal';
 import { authService } from '@/services/authService';
-import type { AuthState } from '@/types/auth';
+import type { AuthState, SelfSelectableRole } from '@/types/auth';
 import {
   ArrowLeft,
   ArrowRight,
@@ -16,7 +16,6 @@ import {
   HelpCircle,
   RefreshCw,
   CheckCircle2,
-  UserCheck,
 } from 'lucide-react';
 
 export interface ParentLoginPageProps {
@@ -31,7 +30,22 @@ const COUNTRY_CODES = [
   { value: '+1-CA', label: '🇨🇦 Canada (+1)' },
 ];
 
+const SIGNUP_ROLES: { value: SelfSelectableRole; label: string; description: string }[] = [
+  { value: 'PARENT', label: 'Parent', description: 'Manage your own care, check-ins and helpers.' },
+  { value: 'FAMILY', label: 'Family member', description: 'Help a parent who invites you to their Care Team.' },
+  { value: 'VOLUNTEER', label: 'Volunteer', description: 'Apply to help. Tasks unlock after verification.' },
+];
+
+const WORKSPACE_BY_ROLE: Record<string, string> = {
+  PARENT: '/parent/onboarding',
+  FAMILY: '/family/home',
+  VOLUNTEER: '/volunteer/home',
+  COORDINATOR: '/coordinator/dashboard',
+  ADMIN: '/admin/dashboard',
+};
+
 export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) => {
+  const [requestedRole, setRequestedRole] = useState<SelfSelectableRole>('PARENT');
   const [authState, setAuthState] = useState<AuthState>({
     step: 'PHONE_ENTRY',
     countryCode: '+1',
@@ -134,17 +148,19 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
       countryCode: authState.countryCode,
       phoneNumber: authState.phoneNumber,
       otpCode: authState.otpCode,
+      requestedRole,
     });
 
     if (res.success) {
       setAuthState((prev) => ({ ...prev, isVerifyingOtp: false, step: 'SUCCESS', errorCode: null, errorMessage: null }));
 
-      // Navigate to Parent Onboarding/Home after successful authentication
+      // The backend decides the role; existing accounts keep theirs regardless of the selection above.
+      const destination = WORKSPACE_BY_ROLE[(res.user?.role || '').toUpperCase()] || '/family/home';
       setTimeout(() => {
         if (onNavigate) {
-          onNavigate('/parent/onboarding');
+          onNavigate(destination);
         } else {
-          window.location.hash = '#/parent/onboarding';
+          window.location.hash = `#${destination}`;
         }
       }, 800);
     } else {
@@ -239,7 +255,7 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
           <CareCard variant="default" padding="lg" className="space-y-6 shadow-care-lg">
             <div className="space-y-2 text-left">
               <span className="text-xs font-bold uppercase tracking-wider text-[#16866B] bg-[#E8F4EF] px-3 py-1 rounded-full">
-                Parent Sign In
+                Sign In
               </span>
               <h1 className="text-2xl sm:text-4xl font-extrabold text-[#1D2926] tracking-tight">
                 Welcome back
@@ -250,6 +266,35 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
             </div>
 
             <form onSubmit={handleSendOtp} className="space-y-5">
+              <fieldset className="space-y-2">
+                <legend className="block font-bold text-[#1D2926] text-base">New to CareSync? I am joining as</legend>
+                <div className="grid gap-2 sm:grid-cols-3" role="radiogroup">
+                  {SIGNUP_ROLES.map((option) => {
+                    const selected = requestedRole === option.value;
+                    return (
+                      <label
+                        key={option.value}
+                        className={`flex min-h-[44px] cursor-pointer flex-col rounded-2xl border-2 p-3 text-left transition-colors focus-within:ring-2 focus-within:ring-[#16866B]/40 ${
+                          selected ? 'border-[#16866B] bg-[#E8F4EF]' : 'border-[#E5E7E5] bg-white hover:border-[#16866B]/50'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="signup-role"
+                          value={option.value}
+                          checked={selected}
+                          onChange={() => setRequestedRole(option.value)}
+                          className="sr-only"
+                        />
+                        <span className="font-bold text-[#1D2926]">{option.label}</span>
+                        <span className="text-sm text-[#66736F]">{option.description}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-sm text-[#8E9B97]">Already have an account? Your existing role is kept.</p>
+              </fieldset>
+
               <div className="space-y-2">
                 <label className="block font-bold text-[#1D2926] text-base">Country & Region</label>
                 <CareSelect
@@ -286,13 +331,6 @@ export const ParentLoginPage: React.FC<ParentLoginPageProps> = ({ onNavigate }) 
             </form>
 
             <div className="pt-4 border-t border-[#F0ECE1] space-y-3 text-center">
-              <button
-                onClick={() => setIsHelpModalOpen(true)}
-                className="text-base font-bold text-[#16866B] hover:underline inline-flex items-center gap-1"
-              >
-                <UserCheck className="w-4 h-4" /> Sign in as Guardian or Caregiver instead
-              </button>
-
               <div className="flex items-center justify-center gap-2 text-xs text-[#8E9B97]">
                 <ShieldCheck className="w-4 h-4 text-[#16866B]" />
                 <span>Encrypted & private — your number is strictly used for secure access.</span>

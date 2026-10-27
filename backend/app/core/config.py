@@ -24,6 +24,11 @@ def get_cors_origins() -> List[str]:
     custom_list = [x.strip() for x in raw_env.split(",") if x.strip()]
     return list(dict.fromkeys(defaults + custom_list))
 
+DEV_ONLY_JWT_SECRET = "caresync-dev-only-insecure-jwt-secret"
+# Secrets that have appeared in the public repository and must never sign deployed tokens.
+PUBLICLY_KNOWN_JWT_SECRETS = {DEV_ONLY_JWT_SECRET, "caresync-secret-key-change-in-production-2026"}
+LOCAL_ENVIRONMENTS = ("development", "local", "test")
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "CareSync Backend API"
     API_V1_STR: str = "/api/v1"
@@ -45,15 +50,28 @@ class Settings(BaseSettings):
     TWILIO_PHONE_NUMBER: Union[str, None] = os.getenv("TWILIO_PHONE_NUMBER", None)
 
     # Security & Auth
-    JWT_SECRET: str = os.getenv("JWT_SECRET", "caresync-secret-key-change-in-production-2026")
+    # The fallback secret is only accepted in local development/test environments (see validate_runtime_security).
+    JWT_SECRET: str = os.getenv("JWT_SECRET", DEV_ONLY_JWT_SECRET)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7 # 7 days
 
-    # Demo Environment Security Control
-    DEMO_RESET_ENABLED: bool = os.getenv("DEMO_RESET_ENABLED", "true").lower() in ("true", "1", "yes")
+    # Demo Environment Security Control (opt-in only; never honoured outside local development/test)
+    DEMO_RESET_ENABLED: bool = os.getenv("DEMO_RESET_ENABLED", "false").lower() in ("true", "1", "yes")
     
     # CORS
     CORS_ORIGINS: List[str] = get_cors_origins()
+
+    @property
+    def is_local_environment(self) -> bool:
+        """True only for local development and automated test runs. Dev-only tooling is gated on this."""
+        return self.ENVIRONMENT in LOCAL_ENVIRONMENTS
+
+    def validate_runtime_security(self) -> None:
+        """Refuses to run a non-local environment with the development JWT secret."""
+        if not self.is_local_environment and (not self.JWT_SECRET or self.JWT_SECRET in PUBLICLY_KNOWN_JWT_SECRETS):
+            raise RuntimeError(
+                f"JWT_SECRET must be set to a strong unique value when ENVIRONMENT='{self.ENVIRONMENT}'."
+            )
 
     class Config:
         case_sensitive = True

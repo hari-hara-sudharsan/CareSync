@@ -89,7 +89,7 @@ async def test_care_request_assignment_and_concurrency_conflict(client: AsyncCli
 
 @pytest.mark.asyncio
 async def test_care_request_decline_and_reassignment_flow(client: AsyncClient):
-    """Tests assignment -> decline -> status returns to DECLINED & unassigned -> reassign."""
+    """Tests that a circle member cannot force DECLINED via the generic transition endpoint (admin-only)."""
     # 1. Create CareRequest
     create_payload = {
         "parent_id": "p-1",
@@ -105,18 +105,14 @@ async def test_care_request_decline_and_reassignment_flow(client: AsyncClient):
     # 2. Assign to Sarah
     await client.post(f"/api/v1/care-requests/{req_id}/assign", json={"assignee_id": "c-2"})
 
-    # 3. Transition to DECLINED
+    # 3. A family member cannot force arbitrary states through the generic transition endpoint;
+    #    declining is reserved for the assignee via /decline (admin-only override otherwise).
     res_decline = await client.post(f"/api/v1/care-requests/{req_id}/transition/DECLINED?reason=Schedule%20conflict")
-    assert res_decline.status_code == 200
-    declined_data = res_decline.json()
-    assert declined_data["status"] == "DECLINED"
-    assert declined_data["assigned_to_id"] is None
+    assert res_decline.status_code == 403
 
-    # 4. Transition back to PENDING_ASSIGNMENT & Reassign to David
-    await client.post(f"/api/v1/care-requests/{req_id}/transition/PENDING_ASSIGNMENT")
+    # 4. The assignment is unchanged, so reassigning to David conflicts
     res_reassign = await client.post(f"/api/v1/care-requests/{req_id}/assign", json={"assignee_id": "c-1"})
-    assert res_reassign.status_code == 200
-    assert res_reassign.json()["assigned_to_id"] == "c-1"
+    assert res_reassign.status_code == 409
 
 @pytest.mark.asyncio
 async def test_parent_care_circle_isolation_protection(client: AsyncClient):

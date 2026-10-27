@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from fastapi import HTTPException
 from app.main import app
+from app.trust.models import VerificationRecord
 from app.models.user import User
 from app.models.parent import ParentProfile
 from app.models.care_request import CareRequest, AssignmentHistory
@@ -63,6 +64,9 @@ async def test_groceries_care_workflow_end_to_end_slice(async_db: AsyncSession):
     )
 
     async_db.add_all([parent_user, coordinator_user, volunteer_user, parent_profile])
+    await async_db.flush()
+    # The volunteer is only recommendable once an administrator has approved their verification.
+    async_db.add(VerificationRecord(user_id=volunteer_user.id, status="VERIFIED", id_verified=True, background_checked=True))
     await async_db.commit()
 
     parent_token = create_access_token(subject=parent_user.id)
@@ -254,6 +258,6 @@ async def test_negative_authorization_and_invalid_state_transitions(async_db: As
     from app.services.care_request_service import CareRequestService
     unassigned_req = CareRequest(id="req-neg-1", parent_id="p-1", category="ERRANDS", title="Test", status="ASSIGNED", assigned_to_id="usr-vol-other")
     with pytest.raises(HTTPException) as exc_info2:
-        CareRequestService.verify_execution_authority(unassigned_req, volunteer_user)
+        await CareRequestService.verify_execution_authority(async_db, unassigned_req, volunteer_user)
     assert exc_info2.value.status_code == 403
     assert "Execution authority requires being the assigned caregiver" in exc_info2.value.detail

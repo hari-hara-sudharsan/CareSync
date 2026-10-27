@@ -79,13 +79,16 @@ async def test_decision_resolution_action_validation(client: AsyncClient, async_
     updated_card = res_card.scalars().first()
     assert updated_card.status == "RESOLVED"
 
+from app.models.care_network import CareMember
+
 @pytest.mark.asyncio
 async def test_resolving_already_closed_decision_rejected(async_db: AsyncSession):
     """
     Scenario: Caregiver attempts to resolve a decision that is already 'RESOLVED'.
     Verifies backend raises HTTP 400 Bad Request.
     """
-    user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="PRIMARY_GUARDIAN", is_active=True)
+    user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="FAMILY", is_active=True)
+    cm = CareMember(parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="PRIMARY_GUARDIAN", role="PRIMARY_GUARDIAN", status="ACTIVE", permissions=["ALL"])
     card = DecisionCard(
         parent_id="p-1",
         type="TEST_CARD",
@@ -94,7 +97,7 @@ async def test_resolving_already_closed_decision_rejected(async_db: AsyncSession
         title="Closed Decision",
         summary="Already resolved card",
     )
-    async_db.add(card)
+    async_db.add_all([user, cm, card])
     await async_db.commit()
 
     with pytest.raises(HTTPException) as exc_info:
@@ -114,7 +117,8 @@ async def test_idempotent_duplicate_decision_resolution(async_db: AsyncSession):
     Scenario: Submitting duplicate decision resolution with same idempotency key.
     Verifies second request returns cached response without duplicate side effects.
     """
-    user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="PRIMARY_GUARDIAN", is_active=True)
+    user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="FAMILY", is_active=True)
+    cm = CareMember(parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="PRIMARY_GUARDIAN", role="PRIMARY_GUARDIAN", status="ACTIVE", permissions=["ALL"])
     card = DecisionCard(
         parent_id="p-1",
         type="TRANSPORTATION_CONFIRMATION",
@@ -123,7 +127,7 @@ async def test_idempotent_duplicate_decision_resolution(async_db: AsyncSession):
         title="Ride Confirmation",
         summary="Confirm ride",
     )
-    async_db.add(card)
+    async_db.add_all([user, cm, card])
     await async_db.commit()
 
     idemp_key = "idemp_dec_resolve_1001"

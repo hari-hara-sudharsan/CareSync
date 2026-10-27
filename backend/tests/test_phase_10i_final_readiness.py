@@ -8,6 +8,7 @@ from app.main import app
 from app.api.v1.demo import reset_demo_environment
 from app.models.outbox import OutboxEvent
 from app.models.decision import DecisionCard, AuditEvent
+from app.models.user import User
 from app.agent.strands_agent import CareCoordinatorAgent, STRANDS_SDK_AVAILABLE
 from app.core.auth_security import token_revocation_service, RevocationCheckStatus
 from app.core.rate_limit import rate_limiter
@@ -18,7 +19,9 @@ async def test_demo_reset_endpoint(async_db: AsyncSession):
     Scenario: Presenter calls POST /api/v1/demo/reset.
     Verifies database is reset to deterministic presentation seed dataset.
     """
-    res = await reset_demo_environment(async_db)
+    admin = User(id="usr-admin-10i", phone="+15550009999", full_name="Demo Admin", role="ADMIN", is_active=True)
+    with patch("app.api.v1.demo.settings.DEMO_RESET_ENABLED", True):
+        res = await reset_demo_environment(async_db, admin)
     assert res["status"] == "RESET_SUCCESSFUL"
     assert "Susan Woodson" in res["seed_parent"]
     assert "David Woodson" in res["seed_primary_caregiver"]
@@ -30,10 +33,10 @@ async def test_demo_reset_endpoint(async_db: AsyncSession):
     assert card is not None
     assert "suitable verified volunteer" in card.summary
 
+    # SECURITY INVARIANT: the destructive reset is never reachable without an authenticated admin.
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         http_res = await ac.post("/api/v1/demo/reset")
-        assert http_res.status_code == 200
-        assert http_res.json()["status"] == "RESET_SUCCESSFUL"
+        assert http_res.status_code == 401
 
 @pytest.mark.asyncio
 async def test_demo_reset_disabled_in_production(async_db: AsyncSession):
@@ -42,14 +45,16 @@ async def test_demo_reset_disabled_in_production(async_db: AsyncSession):
     SECURITY INVARIANT: Demo reset MUST return HTTP 403 Forbidden to protect production datasets.
     """
     with patch("app.api.v1.demo.settings.DEMO_RESET_ENABLED", False):
+        admin = User(id="usr-admin-10i", phone="+15550009999", full_name="Demo Admin", role="ADMIN", is_active=True)
         with pytest.raises(Exception) as exc_info:
-            await reset_demo_environment(async_db)
+            await reset_demo_environment(async_db, admin)
         assert "403" in str(exc_info.value) or "disabled in production" in str(exc_info.value)
 
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            http_res = await ac.post("/api/v1/demo/reset")
-            assert http_res.status_code == 403
-            assert "disabled in production" in http_res.json()["detail"]
+    # Enabled flag is still refused outside a local development/test environment.
+    with patch("app.api.v1.demo.settings.DEMO_RESET_ENABLED", True),          patch("app.api.v1.demo.settings.ENVIRONMENT", "prod"):
+        with pytest.raises(Exception) as exc_info:
+            await reset_demo_environment(async_db, admin)
+        assert "403" in str(exc_info.value) or "disabled in production" in str(exc_info.value)
 
 @pytest.mark.asyncio
 async def test_strands_sdk_agent_initialization():
@@ -91,8 +96,9 @@ async def test_rate_limit_mode_header():
     assert mode in ["DISTRIBUTED", "DEGRADED_LOCAL"]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        res = await ac.post("/api/v1/demo/reset")
-        assert res.status_code == 200
+        # Any rate-limited (non-health) endpoint carries the header, including rejected requests.
+        res = await ac.get("/api/v1/auth/me")
+        assert res.status_code == 401
         assert "x-ratelimit-mode" in res.headers
         assert res.headers["x-ratelimit-mode"] in ["DISTRIBUTED", "DEGRADED_LOCAL"]
 

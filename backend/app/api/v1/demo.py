@@ -6,6 +6,7 @@ from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.api.deps import require_admin_role
 from app.models.user import User
 from app.models.parent import ParentProfile
 from app.models.care_network import CareMember
@@ -20,13 +21,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/reset", status_code=status.HTTP_200_OK)
-async def reset_demo_environment(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def reset_demo_environment(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin_role),
+) -> Dict[str, Any]:
     """
     Resets the CareSync presentation database to a clean, deterministic seed state.
     Provides a repeatable baseline for the 5-minute hackathon live demonstration.
     Enforces DEMO_RESET_ENABLED flag to prevent execution in production environments.
     """
-    if not settings.DEMO_RESET_ENABLED:
+    if not settings.DEMO_RESET_ENABLED or not settings.is_local_environment:
         logger.warning("Attempted execution of POST /api/v1/demo/reset when DEMO_RESET_ENABLED is False.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -199,8 +203,8 @@ async def reset_demo_environment(db: AsyncSession = Depends(get_db)) -> Dict[str
     db.add(card)
 
     audit = AuditEvent(
-        actor_id="demo-system-admin",
-        actor_name="Demo Environment Control",
+        actor_id=current_user.id,
+        actor_name=current_user.full_name,
         action="DEMO_ENVIRONMENT_RESET",
         resource_type="System",
         details={"status": "RESET_SUCCESSFUL", "parent_id": "p-1"},

@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 
 from app.models.care_request import CareRequest, AssignmentHistory
 from app.models.care_network import CareMember
+from app.models.parent import ParentProfile
 from app.models.decision import DecisionCard, AuditEvent
 from app.models.idempotency import IdempotencyRecord
 from app.models.user import User
@@ -20,6 +21,17 @@ class CareRequestService:
     @staticmethod
     async def verify_parent_access(db: AsyncSession, user_id: str, parent_id: str) -> None:
         """Verifies caregiver or user belongs to the target Parent Care Circle (Parent Isolation)."""
+        # 1. Parent Profile Self-Check
+        res_profile = await db.execute(
+            select(ParentProfile).where(
+                ParentProfile.user_id == user_id,
+                ParentProfile.id == parent_id,
+            )
+        )
+        if res_profile.scalars().first():
+            return
+
+        # 2. Care Network Membership Check
         result = await db.execute(
             select(CareMember).where(
                 CareMember.parent_id == parent_id,
@@ -28,42 +40,70 @@ class CareRequestService:
             )
         )
         member = result.scalars().first()
-        allowed_parent_ids = {"p-1", "p-2"} # Demo authorized parent IDs for David Woodson
-        if not member and parent_id not in allowed_parent_ids:
+        if not member:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access Denied: You are not authorized to access this Parent's Care Circle."
             )
 
     @staticmethod
-    def verify_execution_authority(req: CareRequest, current_user: User) -> None:
+    async def verify_execution_authority(db: AsyncSession, req: CareRequest, current_user: User) -> None:
         """
         Execution Authority Verification.
-        Enforces that only the assigned caregiver (or self parent/admin/primary guardian)
-        can execute task state transitions (ACCEPT, START, COMPLETE, FAIL, DECLINE).
+        Enforces that only the assigned caregiver (or admin) can execute task state transitions
+        (ACCEPT, START, COMPLETE, FAIL, DECLINE), and that the assignee is still eligible:
+        an active circle member of this parent, or a still-verified volunteer. Revoking circle
+        membership or volunteer verification therefore takes effect on tasks already assigned.
         """
-        if current_user.role in ["PARENT", "ADMIN", "PRIMARY_GUARDIAN"]:
+        if current_user.role == "ADMIN":
             return
-        if req.assigned_to_id and req.assigned_to_id == current_user.id:
-            return
-        if req.assigned_to_id in ["c-1", "usr-demo-1"] and current_user.id in ["usr-demo-1", "c-1", "usr-pj-1", "usr-pj-2"]:
-            return
+        if not req.assigned_to_id or req.assigned_to_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access Denied: Execution authority requires being the assigned caregiver for this task."
+            )
 
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access Denied: Execution authority requires being the assigned caregiver for this task."
+        from app.services.matching_engine.candidate_directory import CandidateDirectory
+        candidate = await CandidateDirectory.get_candidate(db, current_user.id, req.parent_id)
+        still_eligible = candidate is not None and candidate["is_active"] and (
+            candidate["type"] == "FAMILY" or candidate.get("is_verified")
         )
+        if not still_eligible:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access Denied: Your access to this parent's care tasks is no longer active."
+            )
 
     @staticmethod
-    def verify_parent_confirmation_authority(req: CareRequest, current_user: User) -> None:
+    async def verify_parent_confirmation_authority(db: AsyncSession, req: CareRequest, current_user: User) -> None:
         """
         Parent Confirmation / Cancellation Authority Verification.
         Enforces that only the parent or primary guardian representing the parent context
         can confirm completion, cancel requests, or raise concerns.
         """
-        if current_user.role in ["PARENT", "PRIMARY_GUARDIAN", "ADMIN"]:
+        if current_user.role == "ADMIN":
             return
-        if current_user.id in ["usr-demo-1", "usr-pj-1", "usr-parent-1"]:
+
+        # Check if current user is the parent themselves
+        res_profile = await db.execute(
+            select(ParentProfile).where(
+                ParentProfile.user_id == current_user.id,
+                ParentProfile.id == req.parent_id,
+            )
+        )
+        if res_profile.scalars().first():
+            return
+
+        # Check if current user is an authorized guardian in the care network
+        res_member = await db.execute(
+            select(CareMember).where(
+                CareMember.parent_id == req.parent_id,
+                CareMember.user_id == current_user.id,
+                CareMember.status == "ACTIVE",
+            )
+        )
+        member = res_member.scalars().first()
+        if member and (member.relationship == "PRIMARY_GUARDIAN" or member.role == "PRIMARY_GUARDIAN" or "CARE_HISTORY" in (member.permissions or [])):
             return
 
         raise HTTPException(
@@ -213,12 +253,22 @@ class CareRequestService:
 
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ASSIGNED.value)
 
-        if candidate_dto:
-            if not HardConstraintFilter.is_eligible(candidate_dto, req, req.parent_id):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Ineligible Candidate: Candidate '{assignee_name}' fails current safety, verification, or permission constraints."
-                )
+        # Eligibility is always re-evaluated from authoritative records at assignment time, for every
+        # caller (API, Decision Inbox, agent tools). Caller-supplied candidate_dto data is never trusted.
+        from app.services.matching_engine.candidate_directory import CandidateDirectory
+        candidate = await CandidateDirectory.get_candidate(db, assignee_id, req.parent_id)
+        if candidate is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ineligible Candidate: '{assignee_id}' is not an active care circle member or registered volunteer."
+            )
+        if not HardConstraintFilter.is_eligible(candidate, req, req.parent_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ineligible Candidate: Candidate '{candidate['name']}' fails current safety, verification, or permission constraints."
+            )
+        assignee_name = candidate["name"]
+        assignee_role = f"{candidate['relationship']} (Family)" if candidate["type"] == "FAMILY" else candidate["relationship"]
 
         req.status = CareRequestStatus.ASSIGNED.value
         req.assigned_to_id = assignee_id
@@ -304,7 +354,7 @@ class CareRequestService:
         if req.status == CareRequestStatus.ACCEPTED.value:
             return req
 
-        CareRequestService.verify_execution_authority(req, current_user)
+        await CareRequestService.verify_execution_authority(db, req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.ACCEPTED.value)
 
         req.status = CareRequestStatus.ACCEPTED.value
@@ -373,7 +423,7 @@ class CareRequestService:
         if req.status == CareRequestStatus.IN_PROGRESS.value:
             return req
 
-        CareRequestService.verify_execution_authority(req, current_user)
+        await CareRequestService.verify_execution_authority(db, req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.IN_PROGRESS.value)
 
         req.status = CareRequestStatus.IN_PROGRESS.value
@@ -443,7 +493,7 @@ class CareRequestService:
         if req.status == CareRequestStatus.COMPLETED.value:
             return req
 
-        CareRequestService.verify_execution_authority(req, current_user)
+        await CareRequestService.verify_execution_authority(db, req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.COMPLETED.value)
 
         req.status = CareRequestStatus.COMPLETED.value
@@ -514,7 +564,7 @@ class CareRequestService:
         if req.status == CareRequestStatus.CLOSED.value:
             return req
 
-        CareRequestService.verify_parent_confirmation_authority(req, current_user)
+        await CareRequestService.verify_parent_confirmation_authority(db, req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.PARENT_CONFIRMED.value)
 
         req.status = CareRequestStatus.PARENT_CONFIRMED.value
@@ -611,7 +661,7 @@ class CareRequestService:
         if req.status == CareRequestStatus.PENDING_ASSIGNMENT.value and req.assigned_to_id is None:
             return req
 
-        CareRequestService.verify_execution_authority(req, current_user)
+        await CareRequestService.verify_execution_authority(db, req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.DECLINED.value)
 
         old_assignee_id = req.assigned_to_id
@@ -687,7 +737,7 @@ class CareRequestService:
         if req.status == CareRequestStatus.ESCALATED.value:
             return req
 
-        CareRequestService.verify_execution_authority(req, current_user)
+        await CareRequestService.verify_execution_authority(db, req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.FAILED.value)
 
         req.status = CareRequestStatus.FAILED.value
@@ -893,7 +943,7 @@ class CareRequestService:
         if req.status == CareRequestStatus.CANCELLED.value:
             return req
 
-        CareRequestService.verify_parent_confirmation_authority(req, current_user)
+        await CareRequestService.verify_parent_confirmation_authority(db, req, current_user)
         CareRequestStateMachine.validate_transition(req.status, CareRequestStatus.CANCELLED.value)
 
         old_status = req.status
@@ -957,7 +1007,7 @@ class CareRequestService:
         if not req:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest '{request_id}' not found.")
 
-        CareRequestService.verify_parent_confirmation_authority(req, current_user)
+        await CareRequestService.verify_parent_confirmation_authority(db, req, current_user)
 
         history_entry = AssignmentHistory(
             care_request_id=req.id,

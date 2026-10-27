@@ -6,6 +6,8 @@ from sqlalchemy import select
 from app.models.care_request import CareRequest, AssignmentHistory
 from app.models.decision import AuditEvent
 from app.models.user import User
+from app.models.parent import ParentProfile
+from app.models.care_network import CareMember
 from app.services.care_request_service import CareRequestService
 
 @pytest.mark.asyncio
@@ -128,7 +130,9 @@ async def test_idempotent_confirmation(async_db: AsyncSession):
     Scenario: Repeating parent confirmation call with same idempotency key.
     Verifies second call returns cached response cleanly.
     """
-    user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="PRIMARY_GUARDIAN", is_active=True)
+    user = User(id="usr-demo-1", phone="+15552345678", full_name="David Woodson", role="FAMILY", is_active=True)
+    prof = ParentProfile(id="p-1", user_id="usr-demo-1", full_name="David Woodson")
+    cm = CareMember(parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="PRIMARY_GUARDIAN", role="PRIMARY_GUARDIAN", status="ACTIVE", permissions=["ALL"])
     req = CareRequest(
         parent_id="p-1",
         category="TRANSPORTATION",
@@ -136,10 +140,10 @@ async def test_idempotent_confirmation(async_db: AsyncSession):
         description="Testing confirm",
         priority="HIGH",
         status="COMPLETED",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         requested_time="Today",
     )
-    async_db.add_all([user, req])
+    async_db.add_all([user, prof, cm, req])
     await async_db.commit()
 
     idemp_key = "idemp_confirm_key_999"

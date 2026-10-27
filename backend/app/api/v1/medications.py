@@ -19,7 +19,7 @@ class MedicationEventCreateSchema(BaseModel):
 
 @router.get("/today", summary="Get Today's Medication Timeline")
 async def get_today_medications(
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -69,7 +69,7 @@ async def get_today_medications(
 async def record_medication_event(
     medication_id: str,
     payload: MedicationEventCreateSchema,
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

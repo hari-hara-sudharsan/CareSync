@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.models.care_request import CareRequest, AssignmentHistory
 from app.models.decision import AuditEvent
+from app.models.care_network import CareMember
 from app.models.user import User
 from app.services.care_request_service import CareRequestService
 
@@ -21,7 +22,7 @@ async def test_assigned_caregiver_accepts_task(client: AsyncClient, async_db: As
         description="Transport needed",
         priority="HIGH",
         status="ASSIGNED",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         assigned_to_name="David Woodson",
         assigned_to_role="Son (Family)",
         requested_time="Today",
@@ -52,7 +53,7 @@ async def test_assigned_caregiver_starts_task(client: AsyncClient, async_db: Asy
         description="Transport needed",
         priority="HIGH",
         status="ACCEPTED",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         assigned_to_name="David Woodson",
         assigned_to_role="Son (Family)",
         requested_time="Today",
@@ -77,7 +78,7 @@ async def test_assigned_caregiver_completes_task(client: AsyncClient, async_db: 
         description="Pickup meds",
         priority="NORMAL",
         status="IN_PROGRESS",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         assigned_to_name="David Woodson",
         assigned_to_role="Son (Family)",
         requested_time="Today",
@@ -111,7 +112,7 @@ async def test_non_assigned_caregiver_cannot_mutate_execution(async_db: AsyncSes
         description="Assigned to David",
         priority="HIGH",
         status="ASSIGNED",
-        assigned_to_id="c-1", # Assigned to David Woodson
+        assigned_to_id="usr-demo-1", # Assigned to David Woodson
         assigned_to_name="David Woodson",
         assigned_to_role="Son",
         requested_time="Today",
@@ -140,7 +141,7 @@ async def test_cross_parent_caregiver_cannot_mutate_execution(client: AsyncClien
         description="Cross parent",
         priority="NORMAL",
         status="ASSIGNED",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         requested_time="Today",
     )
     async_db.add(req)
@@ -154,7 +155,8 @@ async def test_cross_parent_caregiver_cannot_mutate_execution(client: AsyncClien
 async def test_invalid_transition_pending_to_accepted_rejected(client: AsyncClient, async_db: AsyncSession):
     """
     Scenario: Attempting to accept a task directly from PENDING_ASSIGNMENT state.
-    Verifies state machine raises HTTP 400 Bad Request.
+    Nobody is assigned yet, so execution authority denies the attempt (403) before the
+    state machine is consulted; the request must remain unassigned.
     """
     req = CareRequest(
         parent_id="p-1",
@@ -169,8 +171,10 @@ async def test_invalid_transition_pending_to_accepted_rejected(client: AsyncClie
     await async_db.commit()
 
     res = await client.post(f"/api/v1/care-requests/{req.id}/accept")
-    assert res.status_code == 400
-    assert "Illegal CareRequest status transition" in res.json()["detail"]
+    assert res.status_code == 403
+    await async_db.refresh(req)
+    assert req.status == "PENDING_ASSIGNMENT"
+    assert req.assigned_to_id is None
 
 @pytest.mark.asyncio
 async def test_invalid_transition_assigned_to_inprogress_rejected(client: AsyncClient, async_db: AsyncSession):
@@ -185,7 +189,7 @@ async def test_invalid_transition_assigned_to_inprogress_rejected(client: AsyncC
         description="Assigned but not accepted",
         priority="HIGH",
         status="ASSIGNED",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         requested_time="Today",
     )
     async_db.add(req)
@@ -208,7 +212,7 @@ async def test_completed_task_cannot_be_restarted(client: AsyncClient, async_db:
         description="Completed task",
         priority="NORMAL",
         status="COMPLETED",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         requested_time="Today",
     )
     async_db.add(req)
@@ -237,7 +241,8 @@ async def test_idempotent_accept(async_db: AsyncSession):
         assigned_to_role="Son",
         requested_time="Today",
     )
-    async_db.add_all([user, req])
+    # The assignee must be an active circle member to execute the task.
+    async_db.add_all([user, req, CareMember(parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="Son", role="FAMILY", status="ACTIVE", permissions=["ALL"])])
     await async_db.commit()
 
     idemp_key = "idemp_accept_key_888"
@@ -283,7 +288,8 @@ async def test_audit_events_and_append_only_history_generated(async_db: AsyncSes
         assigned_to_role="Son",
         requested_time="Today",
     )
-    async_db.add_all([user, req])
+    # The assignee must be an active circle member to execute the task.
+    async_db.add_all([user, req, CareMember(parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="Son", role="FAMILY", status="ACTIVE", permissions=["ALL"])])
     await async_db.commit()
 
     # Step 1: Accept

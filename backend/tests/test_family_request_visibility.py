@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.parent import ParentProfile
 from app.models.user import User
 from app.models.care_request import CareRequest
 from app.models.care_network import CareMember
@@ -16,6 +17,7 @@ async def test_authorized_caregiver_sees_persisted_care_requests(client: AsyncCl
     # 1. Parent submits check-in
     parent_user = User(id="usr-pj-vis-1", phone="+15551110001", full_name="Susan Woodson", role="PARENT", is_active=True)
     async_db.add(parent_user)
+    async_db.add(ParentProfile(id="p-1", user_id=parent_user.id, full_name=parent_user.full_name))
     await async_db.commit()
 
     checkin_res = await CheckInService.submit_checkin(

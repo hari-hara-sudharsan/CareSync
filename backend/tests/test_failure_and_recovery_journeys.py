@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.models.care_request import CareRequest, AssignmentHistory
 from app.models.decision import DecisionCard, AuditEvent
 from app.models.user import User
+from app.models.care_network import CareMember
 from app.services.care_request_service import CareRequestService
 from app.services.decision_service import DecisionService
 
@@ -22,7 +23,7 @@ async def test_assigned_caregiver_can_decline_task(client: AsyncClient, async_db
         description="Ride needed",
         priority="HIGH",
         status="ASSIGNED",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         assigned_to_name="David Woodson",
         assigned_to_role="Son (Family)",
         requested_time="Today",
@@ -59,7 +60,7 @@ async def test_decline_returns_request_to_pending_assignment_without_auto_assign
         description="Med pickup",
         priority="NORMAL",
         status="ASSIGNED",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         assigned_to_name="David Woodson",
         assigned_to_role="Son",
         requested_time="Today",
@@ -117,7 +118,7 @@ async def test_execution_actor_can_report_failure(client: AsyncClient, async_db:
         description="Ride needed",
         priority="HIGH",
         status="IN_PROGRESS",
-        assigned_to_id="c-1",
+        assigned_to_id="usr-demo-1",
         assigned_to_name="David Woodson",
         assigned_to_role="Son",
         requested_time="Today",
@@ -144,16 +145,17 @@ async def test_execution_actor_can_report_failure(client: AsyncClient, async_db:
 @pytest.mark.asyncio
 async def test_invalid_failure_transition_rejected(client: AsyncClient, async_db: AsyncSession):
     """
-    Scenario: Attempting to report failure on an unstarted (PENDING_ASSIGNMENT) task.
-    Verifies state machine raises HTTP 400 Bad Request.
+    Scenario: The assigned caregiver reports failure on a task that was never started (ASSIGNED).
+    Verifies state machine raises HTTP 400 Bad Request (FAILED is only reachable from IN_PROGRESS).
     """
     req = CareRequest(
         parent_id="p-1",
         category="TRANSPORTATION",
-        title="Unassigned Task",
-        description="Pending task",
+        title="Unstarted Task",
+        description="Assigned but not started",
         priority="NORMAL",
-        status="PENDING_ASSIGNMENT",
+        status="ASSIGNED",
+        assigned_to_id="usr-demo-1",
         requested_time="Today",
     )
     async_db.add(req)
@@ -325,7 +327,11 @@ async def test_decision_card_action_executes_recovery(async_db: AsyncSession):
         status="ESCALATED",
         requested_time="Today",
     )
-    async_db.add_all([user, req])
+    membership = CareMember(
+        parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678",
+        relationship="PRIMARY_GUARDIAN", role="PRIMARY_GUARDIAN", status="ACTIVE", permissions=["ALL"],
+    )
+    async_db.add_all([user, req, membership])
     await async_db.flush()
 
     card = DecisionCard(
@@ -371,7 +377,8 @@ async def test_idempotent_decline_fail_cancel(async_db: AsyncSession):
         assigned_to_role="Son",
         requested_time="Today",
     )
-    async_db.add_all([user, req])
+    # The assignee must be an active circle member to execute the task.
+    async_db.add_all([user, req, CareMember(parent_id="p-1", user_id="usr-demo-1", name="David Woodson", phone="+15552345678", relationship="Son", role="FAMILY", status="ACTIVE", permissions=["ALL"])])
     await async_db.commit()
 
     idemp_key = "idemp_decline_key_555"

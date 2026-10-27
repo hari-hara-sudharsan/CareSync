@@ -89,7 +89,7 @@ class ProductionOtpDelivery(OtpDeliveryService):
 
 
 def get_otp_delivery_service() -> OtpDeliveryService:
-    if getattr(settings, "ENVIRONMENT", "development") == "production":
+    if not settings.is_local_environment:
         return ProductionOtpDelivery()
     return DevelopmentOtpDelivery()
 

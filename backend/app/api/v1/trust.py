@@ -102,7 +102,7 @@ async def file_complaint(
 
 @router.get("/complaints", summary="Get Parent Complaints")
 async def get_complaints(
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

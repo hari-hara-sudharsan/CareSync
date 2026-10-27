@@ -90,11 +90,29 @@ class CareCoordinatorAgent:
         and HITL decision card creation.
         """
         event_type = event.event_type
-        payload = event.payload if isinstance(event.payload, dict) else {}
+        envelope = event.payload if isinstance(event.payload, dict) else {}
+        payload = envelope
         if "data" in payload and isinstance(payload["data"], dict):
             payload = payload["data"]
 
-        parent_id = getattr(event, "parent_id", None) or payload.get("parent_id", "p-1")
+        parent_id = getattr(event, "parent_id", None) or envelope.get("parent_id") or payload.get("parent_id")
+        if not parent_id:
+            # Resolve the parent from the authoritative CareRequest instead of guessing.
+            from app.models.care_request import CareRequest
+            request_id = payload.get("care_request_id") or getattr(event, "aggregate_id", None)
+            if request_id:
+                res_parent = await db.execute(select(CareRequest.parent_id).where(CareRequest.id == request_id))
+                parent_id = res_parent.scalar()
+        if not parent_id:
+            logger.warning(f"[{self.agent_id}] Event '{event.id}' has no resolvable parent; no action taken.")
+            return {
+                "event_id": event.id,
+                "event_type": event.event_type,
+                "reasoning": "Event could not be linked to a parent care context.",
+                "summary": "No action taken.",
+                "status": "NO_ACTION",
+                "strands_sdk_active": self.strands_sdk_active,
+            }
         correlation_id = getattr(event, "correlation_id", None) or payload.get("correlation_id", event.id)
 
         logger.info(f"[{self.agent_id}] Observing Event '{event_type}' (Correlation ID: '{correlation_id}')")
@@ -179,31 +197,41 @@ class CareCoordinatorAgent:
                 res_r = await db.execute(select(CareRequest).where(CareRequest.id == care_request_id))
                 req_obj = res_r.scalars().first()
 
-                candidate_pool = [
-                    {
-                        "id": "usr-vol-slice-1",
-                        "user_id": "usr-vol-slice-1",
-                        "name": "Verified Volunteer Helper",
-                        "type": "VOLUNTEER",
-                        "is_active": True,
-                        "is_available": True,
-                        "parent_id": parent_id,
-                        "distance_km": 1.5,
-                        "reliability_score": 99.0,
-                        "permissions": ["ERRANDS", "TRANSPORTATION", "MEDICATION", "CHECK_INS"],
-                        "has_transport_capability": True,
-                        "phone": "+15559993333",
-                    }
-                ]
+                from app.services.matching_engine.candidate_directory import CandidateDirectory
+                candidate_pool = await CandidateDirectory.get_candidate_pool(db, parent_id) if parent_id else []
 
-                if req_obj:
+                top_candidate = None
+                if req_obj and candidate_pool:
                     match_res = MatchingEngineService.match_candidates(req_obj, candidate_pool)
-                    top_candidate = match_res["candidates"][0] if match_res.get("candidates") else candidate_pool[0]
-                else:
-                    top_candidate = candidate_pool[0]
+                    if match_res.get("candidates"):
+                        top_candidate = match_res["candidates"][0]
 
-                candidate_name = top_candidate.get("name", "Verified Volunteer")
-                candidate_id = top_candidate.get("candidate_id") or top_candidate.get("id", "usr-vol-slice-1")
+                if top_candidate is None:
+                    card = await AgentActionTools.create_decision_card(
+                        db=db,
+                        parent_id=parent_id,
+                        related_entity_id=care_request_id,
+                        card_type="NO_ELIGIBLE_CANDIDATE",
+                        priority="HIGH" if payload.get("priority") == "HIGH" else "NORMAL",
+                        title=f"No eligible helper found: {payload.get('title', 'Care Request')}",
+                        summary="Deterministic matching found no eligible family member or verified volunteer. A human decision is needed.",
+                        reason=f"Event '{event_type}' processed by Care Coordinator Agent.",
+                        actions=[{"key": "escalate", "label": "Escalate for Human Decision"}],
+                        idempotency_key=f"agent-match-card-{event.id}",
+                    )
+                    return {
+                        "event_id": event.id,
+                        "event_type": event_type,
+                        "reasoning": "Care request created. No eligible candidate; surfaced a human decision card.",
+                        "summary": "No eligible helper found; human decision requested.",
+                        "tool_executed": "create_decision_card",
+                        "status": "PROCESSED",
+                        "card_id": card.id,
+                        "strands_sdk_active": self.strands_sdk_active,
+                    }
+
+                candidate_name = top_candidate.get("name", "Candidate")
+                candidate_id = top_candidate.get("candidate_id") or top_candidate.get("id")
 
                 card = await AgentActionTools.create_decision_card(
                     db=db,
@@ -233,6 +261,7 @@ class CareCoordinatorAgent:
 
         except Exception as exc:
             logger.error(f"[{self.agent_id}] Exception during event processing: {exc}")
+            await db.rollback()
             # Fallback resilience: emit HITL card on unexpected model or agent failure
             return {
                 "event_id": event.id,

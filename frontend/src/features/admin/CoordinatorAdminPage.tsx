@@ -9,7 +9,7 @@ interface CoordinatorAdminPageProps {
   onNavigate?: (path: string) => void;
 }
 
-export const CoordinatorAdminPage: React.FC<CoordinatorAdminPageProps> = ({ onNavigate }) => {
+export const CoordinatorAdminPage: React.FC<CoordinatorAdminPageProps> = ({ onNavigate: _onNavigate }) => {
   const [escalations, setEscalations] = useState<CareRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -68,11 +68,9 @@ export const CoordinatorAdminPage: React.FC<CoordinatorAdminPageProps> = ({ onNa
           </div>
 
           <div className="mt-4 md:mt-0 flex items-center space-x-3">
-            {onNavigate && (
-              <CareButton variant="secondary" size="sm" onClick={() => onNavigate('/family/home')}>
-                Switch Persona
-              </CareButton>
-            )}
+            <span className="text-xs text-purple-300 font-bold px-3 py-1 bg-purple-950/80 rounded-lg border border-purple-800">
+              Live Governance Mode
+            </span>
           </div>
         </div>
 

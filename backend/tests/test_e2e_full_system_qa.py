@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
 
+from app.models.parent import ParentProfile
 from app.models.user import User
 from app.models.care_request import CareRequest
 from app.models.care_network import CareMember
@@ -34,6 +35,7 @@ async def test_scenario_1_healthy_parent_checkin(async_db: AsyncSession):
     """
     parent = User(id="usr-e2e-1", phone="+15559000001", full_name="Healthy Parent", role="PARENT", is_active=True)
     async_db.add(parent)
+    async_db.add(ParentProfile(id="p-1", user_id=parent.id, full_name=parent.full_name))
     await async_db.commit()
 
     res = await CheckInService.submit_checkin(
@@ -81,6 +83,7 @@ async def test_scenario_2_parent_needs_help_full_lifecycle(async_db: AsyncSessio
     )
     
     async_db.add_all([parent, family, volunteer, fam_member])
+    async_db.add(ParentProfile(id="p-1", user_id=parent.id, full_name=parent.full_name))
     await async_db.commit()
 
     # Step 1: Parent submits check-in requiring assistance -> Creates CareRequest in PENDING_ASSIGNMENT
@@ -207,6 +210,7 @@ async def test_scenario_4_scheduled_medication_agent_guardrails(async_db: AsyncS
     """
     parent = User(id="usr-e2e-4", phone="+15559000007", full_name="Med Parent", role="PARENT", is_active=True)
     async_db.add(parent)
+    async_db.add(ParentProfile(id="p-1", user_id=parent.id, full_name=parent.full_name))
     await async_db.commit()
 
     res = await CheckInService.submit_checkin(

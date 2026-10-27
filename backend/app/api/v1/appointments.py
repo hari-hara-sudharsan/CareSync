@@ -19,7 +19,7 @@ class TransportationChoiceSchema(BaseModel):
 
 @router.get("", summary="Get Upcoming Parent Appointments")
 async def get_appointments(
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -55,7 +55,7 @@ async def get_appointments(
 async def update_appointment_transportation(
     appointment_id: str,
     payload: TransportationChoiceSchema,
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

@@ -5,19 +5,23 @@ from sqlalchemy import select, desc
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.api.deps import get_current_user, verify_parent_authorization
+from app.api.deps import get_current_user, verify_parent_authorization, require_admin_role
 from app.models.user import User
 from app.models.care_request import CareRequest, AssignmentHistory
 from app.models.care_network import CareMember
+from app.models.parent import ParentProfile
 from app.schemas.care_request import CareRequestCreate, CareRequestRead, CareRequestAssign
 from app.services.care_request_service import CareRequestService
 from app.services.care_request_state_machine import CareRequestStatus
 from app.services.matching_engine.matching_service import MatchingEngineService
-from app.core.authorization import CarePermission
+from app.services.matching_engine.candidate_directory import CandidateDirectory
+from app.core.config import settings
+from app.core.authorization import CarePermission, map_category_to_permission
 
 router = APIRouter()
 
 class MatchingPayload(BaseModel):
+    # Test-only hook for exercising the matching engine; ignored outside ENVIRONMENT=test.
     custom_candidate_pool: Optional[List[Dict[str, Any]]] = None
 
 class CompletionPayload(BaseModel):
@@ -37,21 +41,10 @@ class DeclinePayload(BaseModel):
 class CancellationPayload(BaseModel):
     reason: Optional[str] = None
 
-def map_category_to_permission(category: str) -> CarePermission:
-    cat_upper = category.upper() if category else ""
-    if "TRANSPORT" in cat_upper:
-        return CarePermission.TRANSPORTATION
-    elif "MED" in cat_upper or "PHARM" in cat_upper:
-        return CarePermission.MEDICATION
-    elif "APPOINT" in cat_upper:
-        return CarePermission.APPOINTMENTS
-    elif "HISTORY" in cat_upper:
-        return CarePermission.CARE_HISTORY
-    return CarePermission.CHECK_INS
 
 @router.get("", summary="Get Care Requests with Filters & Parent Isolation")
 async def get_care_requests(
-    parent_id: str = "p-1",
+    parent_id: str,
     status_filter: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -80,8 +73,35 @@ async def get_care_request_detail(
             detail=f"CareRequest '{request_id}' not found."
         )
 
+    # 1. Volunteer Least-Privilege Data Minimization Check ("Volunteer gets task, not medical history")
+    if current_user.role == "VOLUNTEER":
+        if not req.assigned_to_id or req.assigned_to_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access Denied: You are not authorized to view this unassigned care task."
+            )
+        # Return sanitized task-scoped logistics payload for assigned volunteer
+        return {
+            "id": req.id,
+            "category": req.category,
+            "title": req.title,
+            "description": req.description,
+            "priority": req.priority,
+            "status": req.status,
+            "requested_time": req.requested_time,
+            "location_name": req.location_name,
+            "address": req.address,
+            "created_at": req.created_at,
+        }
+
+    # 2. Parent / Family / Admin ABAC Verification
     required_perm = map_category_to_permission(req.category)
     await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
+
+    # Resolve parent display name from database ParentProfile
+    res_parent = await db.execute(select(ParentProfile).where(ParentProfile.id == req.parent_id))
+    parent_prof = res_parent.scalars().first()
+    parent_name = parent_prof.full_name if parent_prof else "Parent"
 
     res_hist = await db.execute(
         select(AssignmentHistory)
@@ -93,7 +113,7 @@ async def get_care_request_detail(
     return {
         "id": req.id,
         "parent_id": req.parent_id,
-        "parent_name": "Susan Woodson" if req.parent_id == "p-1" else "George Miller",
+        "parent_name": parent_name,
         "category": req.category,
         "title": req.title,
         "description": req.description,
@@ -169,56 +189,10 @@ async def get_matching_recommendations(
     required_perm = map_category_to_permission(req.category)
     await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
-    if payload and payload.custom_candidate_pool is not None:
+    if payload and payload.custom_candidate_pool is not None and settings.ENVIRONMENT == "test":
         candidate_pool = payload.custom_candidate_pool
     else:
-        candidate_pool = [
-            {
-                "id": "c-1",
-                "name": "David Woodson",
-                "relationship": "Son",
-                "type": "FAMILY",
-                "is_active": True,
-                "is_available": True,
-                "is_primary_contact": True,
-                "parent_id": req.parent_id,
-                "distance_km": 2.5,
-                "reliability_score": 4.9,
-                "permissions": ["TRANSPORTATION", "ERRANDS", "MEDICATION", "CHECK_INS", "PHARMACY"],
-                "has_transport_capability": True,
-                "phone": "+1 (555) 234-5678",
-            },
-            {
-                "id": "c-2",
-                "name": "Sarah Woodson",
-                "relationship": "Daughter",
-                "type": "FAMILY",
-                "is_active": True,
-                "is_available": True,
-                "is_primary_contact": False,
-                "parent_id": req.parent_id,
-                "distance_km": 5.0,
-                "reliability_score": 4.8,
-                "permissions": ["TRANSPORTATION", "ERRANDS", "CHECK_INS"],
-                "has_transport_capability": True,
-                "phone": "+1 (555) 876-5432",
-            },
-            {
-                "id": "c-3",
-                "name": "Priya Sharma",
-                "relationship": "Verified Volunteer",
-                "type": "VOLUNTEER",
-                "is_active": True,
-                "is_verified": True,
-                "verification_status": "VERIFIED",
-                "is_available": True,
-                "distance_km": 1.4,
-                "reliability_score": 4.9,
-                "permissions": ["TRANSPORTATION", "ERRANDS", "PHARMACY", "MEDICATION", "CHECK_INS"],
-                "has_transport_capability": True,
-                "phone": "+1 (555) 345-6789",
-            },
-        ]
+        candidate_pool = await CandidateDirectory.get_candidate_pool(db, req.parent_id)
 
     recommendation = MatchingEngineService.match_candidates(req, candidate_pool, top_k=5)
     return recommendation
@@ -239,20 +213,14 @@ async def assign_care_request(
     required_perm = map_category_to_permission(req.category)
     await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
-    result = await db.execute(select(User).where(User.id == payload.assignee_id))
-    assignee = result.scalars().first()
-    assignee_name = payload.assignee_name or (assignee.full_name if assignee else ("David Woodson" if payload.assignee_id == "c-1" else ("Priya Sharma" if payload.assignee_id == "c-3" else "Assigned Helper")))
-    assignee_role = payload.assignee_role or (assignee.role if assignee else ("Son (Family)" if payload.assignee_id == "c-1" else ("Verified Volunteer" if payload.assignee_id == "c-3" else "Family Member")))
-
     assigned_req = await CareRequestService.assign_care_request(
         db=db,
         request_id=request_id,
         assignee_id=payload.assignee_id,
-        assignee_name=assignee_name,
-        assignee_role=assignee_role,
+        assignee_name=payload.assignee_name or "",
+        assignee_role=payload.assignee_role or "",
         actor_id=current_user.id,
         actor_name=current_user.full_name,
-        candidate_dto=payload.candidate_dto,
         idempotency_key=idempotency_key,
     )
     return assigned_req
@@ -493,15 +461,17 @@ async def transition_care_request_status(
     target_status: str,
     reason: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin_role),
 ):
+    """
+    Administrative state override. Ordinary workflows must use the dedicated, authority-checked
+    endpoints (accept/start/complete/decline/fail/confirm/cancel); this generic transition would
+    otherwise let any circle member force states such as COMPLETED or CLOSED.
+    """
     res_req = await db.execute(select(CareRequest).where(CareRequest.id == request_id))
     req = res_req.scalars().first()
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"CareRequest {request_id} not found.")
-
-    required_perm = map_category_to_permission(req.category)
-    await verify_parent_authorization(req.parent_id, required_perm, db, current_user)
 
     updated = await CareRequestService.update_request_status(
         db=db,

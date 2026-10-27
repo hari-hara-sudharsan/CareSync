@@ -21,7 +21,7 @@ class CheckInCreateSchema(BaseModel):
 
 @router.get("/today", summary="Get Today's Check-In Status for Active Parent")
 async def get_today_checkin_status(
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -29,7 +29,7 @@ async def get_today_checkin_status(
 
 @router.get("", summary="Get Parent Check-In History")
 async def get_checkins(
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

@@ -10,6 +10,7 @@ from app.models.decision import AuditEvent
 from app.agent.quiet_loop import QuietCoordinationLoop
 from app.agent.schema import AgentDecisionOutput
 from app.services.care_request_service import CareRequestService
+from app.services.matching_engine.candidate_directory import CandidateDirectory
 
 router = APIRouter()
 
@@ -43,44 +44,13 @@ async def get_agent_status(
 
 @router.post("/coordinate", response_model=AgentDecisionOutput, summary="Trigger Agent Quiet Coordination Loop Cycle")
 async def run_agent_coordination_cycle(
-    parent_id: str = "p-1",
+    parent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     await CareRequestService.verify_parent_access(db, current_user.id, parent_id)
 
-    candidate_pool = [
-        {
-            "id": "c-1",
-            "name": "David Woodson",
-            "relationship": "Son",
-            "type": "FAMILY",
-            "is_active": True,
-            "is_available": True,
-            "is_primary_contact": True,
-            "parent_id": parent_id,
-            "distance_km": 2.5,
-            "reliability_score": 4.9,
-            "permissions": ["TRANSPORTATION", "ERRANDS", "MEDICATION", "CHECK_INS"],
-            "has_transport_capability": True,
-            "phone": "+1 (555) 234-5678",
-        },
-        {
-            "id": "c-2",
-            "name": "Sarah Woodson",
-            "relationship": "Daughter",
-            "type": "FAMILY",
-            "is_active": True,
-            "is_available": True,
-            "is_primary_contact": False,
-            "parent_id": parent_id,
-            "distance_km": 5.0,
-            "reliability_score": 4.8,
-            "permissions": ["TRANSPORTATION", "ERRANDS", "CHECK_INS"],
-            "has_transport_capability": True,
-            "phone": "+1 (555) 876-5432",
-        },
-    ]
+    candidate_pool = await CandidateDirectory.get_candidate_pool(db, parent_id)
 
     result = await QuietCoordinationLoop.run_cycle(db, parent_id, candidate_pool)
     return result

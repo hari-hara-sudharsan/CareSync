@@ -7,6 +7,7 @@ from unittest.mock import patch
 from app.models.care_request import CareRequest
 from app.models.outbox import OutboxEvent, ProcessedEvent
 from app.models.decision import DecisionCard, AuditEvent
+from app.models.parent import ParentProfile
 from app.models.user import User
 from app.agent.strands_agent import CareCoordinatorAgent
 from app.agent.event_consumer import AgentEventConsumer
@@ -207,6 +208,7 @@ async def test_human_approval_decision_card_link(async_db: AsyncSession):
     """
     parent_user = User(id="usr-pj-1", phone="+15551234567", full_name="Susan Woodson", role="PARENT", is_active=True)
     async_db.add(parent_user)
+    async_db.add(ParentProfile(id="p-1", user_id=parent_user.id, full_name=parent_user.full_name))
     await async_db.commit()
 
     card = await AgentActionTools.create_decision_card(

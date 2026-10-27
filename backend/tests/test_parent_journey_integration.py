@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.models.checkin import CheckInEvent
 from app.models.care_request import CareRequest
 from app.services.checkin_service import CheckInService
+from app.models.parent import ParentProfile
 from app.models.user import User
 
 @pytest.mark.asyncio
@@ -13,6 +14,7 @@ async def test_authenticated_parent_checkin_well(async_db: AsyncSession):
     """Verifies 'WELL' branch creates CheckInEvent and NO CareRequest."""
     user = User(id="usr-pj-1", phone="+15550001111", full_name="Susan Woodson", role="PARENT", is_active=True)
     async_db.add(user)
+    async_db.add(ParentProfile(id="p-1", user_id=user.id, full_name=user.full_name))
     await async_db.commit()
 
     res = await CheckInService.submit_checkin(
@@ -39,6 +41,7 @@ async def test_authenticated_parent_checkin_need_help(async_db: AsyncSession):
     """Verifies 'NEED_HELP' branch creates CheckInEvent AND a real CareRequest."""
     user = User(id="usr-pj-2", phone="+15550002222", full_name="Susan Woodson", role="PARENT", is_active=True)
     async_db.add(user)
+    async_db.add(ParentProfile(id="p-1", user_id=user.id, full_name=user.full_name))
     await async_db.commit()
 
     res = await CheckInService.submit_checkin(
@@ -69,6 +72,7 @@ async def test_idempotent_duplicate_checkin_submission(async_db: AsyncSession):
     """Verifies that submitting with same idempotency key returns cached response without duplicate CareRequest."""
     user = User(id="usr-pj-3", phone="+15550003333", full_name="Susan Woodson", role="PARENT", is_active=True)
     async_db.add(user)
+    async_db.add(ParentProfile(id="p-1", user_id=user.id, full_name=user.full_name))
     await async_db.commit()
 
     idemp_key = "idemp_chk_unique_999"
@@ -122,6 +126,7 @@ async def test_invalid_checkin_branch_rejected(async_db: AsyncSession):
     """Verifies invalid feeling_branch raises HTTP 400 Bad Request."""
     user = User(id="usr-pj-4", phone="+15550004444", full_name="Susan Woodson", role="PARENT", is_active=True)
     async_db.add(user)
+    async_db.add(ParentProfile(id="p-1", user_id=user.id, full_name=user.full_name))
     await async_db.commit()
 
     with pytest.raises(HTTPException) as exc_info:

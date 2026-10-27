@@ -16,6 +16,8 @@ setup_json_logging(service_name="care-api", log_level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup: refuse to serve a deployed environment with development secrets
+    settings.validate_runtime_security()
     # Startup: Create tables if not existing
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

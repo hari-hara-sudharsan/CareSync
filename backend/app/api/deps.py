@@ -1,15 +1,43 @@
+import logging
+import json
+from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional, List, Callable
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.core.authorization import CarePermission, CareRole, verify_care_permission
 from app.models.user import User
+from app.models.parent import ParentProfile
 from app.models.care_network import CareMember
+from app.trust.verification import VerificationService
+
+logger = logging.getLogger("caresync.security")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/verify-otp", auto_error=False)
+
+def log_security_denial(
+    actor_id: str,
+    actor_role: str,
+    target_resource: str,
+    resource_id: str,
+    action: str,
+    reason: str,
+) -> None:
+    """Emits structured security application log for authorization denials without leaking sensitive PII."""
+    payload = {
+        "event": "security_authorization_denied",
+        "actor_id": actor_id,
+        "actor_role": actor_role,
+        "target_resource": target_resource,
+        "resource_id": resource_id,
+        "action": action,
+        "reason": reason,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    logger.warning(json.dumps(payload))
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
@@ -54,18 +82,51 @@ def require_roles(allowed_roles: List[str]) -> Callable:
     async def role_checker(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role == "ADMIN" or current_user.role in allowed_roles:
             return current_user
+        log_security_denial(
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            target_resource="ROLE_ENDPOINT",
+            resource_id=",".join(allowed_roles),
+            action="EXECUTE",
+            reason=f"Role '{current_user.role}' not in allowed roles {allowed_roles}",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access Denied: Role '{current_user.role}' is not authorized to access this resource."
         )
     return role_checker
 
-# Role-specific shortcut dependency guards
-require_parent_role = require_roles(["PARENT", "PRIMARY_GUARDIAN", "ADMIN"])
-require_family_role = require_roles(["FAMILY", "PRIMARY_GUARDIAN", "PARENT", "ADMIN"])
+# Strict role dependency guards
+require_parent_role = require_roles(["PARENT", "ADMIN"])
+require_family_role = require_roles(["FAMILY", "ADMIN"])
 require_volunteer_role = require_roles(["VOLUNTEER", "ADMIN"])
 require_coordinator_role = require_roles(["COORDINATOR", "ADMIN"])
 require_admin_role = require_roles(["ADMIN"])
+
+async def require_verified_volunteer(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_volunteer_role),
+) -> User:
+    """
+    Volunteer task access requires an administrator-approved VerificationRecord.
+    Selecting the Volunteer role at signup only creates a PENDING application.
+    """
+    if current_user.role == "ADMIN":
+        return current_user
+    if await VerificationService.is_candidate_eligible(db, current_user.id, "VOLUNTEER"):
+        return current_user
+    log_security_denial(
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        target_resource="VOLUNTEER_TASKS",
+        resource_id=current_user.id,
+        action="ACCESS",
+        reason="Volunteer verification is not approved",
+    )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Access Denied: Your volunteer verification has not been approved yet.",
+    )
 
 async def verify_parent_authorization(
     parent_id: str,
@@ -74,17 +135,58 @@ async def verify_parent_authorization(
     current_user: User = Depends(get_current_user),
 ) -> CareMember:
     """
-    Unified Authorization Boundary:
+    Authoritative Attribute-Based Access Control (ABAC) Security Boundary:
     Evaluates: Authenticated User -> CareMember Relationship -> Active Parent Context -> CarePermission.
-    Strictly denies unauthorized cross-parent access.
+    Strictly queries database records with ZERO hardcoded identity bypasses.
+    Denies unauthorized cross-parent or unlinked caregiver access with HTTP 403 Forbidden.
     """
+    # 1. Global Platform Administration Governance (Audit Context)
     if current_user.role == "ADMIN":
-        return CareMember(parent_id=parent_id, user_id=current_user.id, name=current_user.full_name, phone=current_user.phone, relationship="Admin", role="ADMIN", status="ACTIVE", permissions=["ALL"])
+        return CareMember(
+            parent_id=parent_id,
+            user_id=current_user.id,
+            name=current_user.full_name,
+            phone=current_user.phone,
+            relationship="Admin",
+            role="ADMIN",
+            status="ACTIVE",
+            permissions=["ALL"],
+        )
 
-    # Parents checking in for themselves
-    if current_user.role == "PARENT" and parent_id in ["p-1", "p-2", current_user.id]:
-        return CareMember(parent_id=parent_id, user_id=current_user.id, name=current_user.full_name, phone=current_user.phone, relationship="Self", role="PARENT", status="ACTIVE", permissions=["ALL"])
+    # 2. Direct Parent Self-Access (Database-backed relationship check)
+    if current_user.role == "PARENT":
+        res_profile = await db.execute(
+            select(ParentProfile).where(
+                ParentProfile.user_id == current_user.id,
+                or_(ParentProfile.id == parent_id, ParentProfile.user_id == parent_id),
+            )
+        )
+        profile = res_profile.scalars().first()
+        if profile:
+            return CareMember(
+                parent_id=profile.id,
+                user_id=current_user.id,
+                name=profile.full_name,
+                phone=current_user.phone,
+                relationship="Self",
+                role="PARENT",
+                status="ACTIVE",
+                permissions=["ALL"],
+            )
+        log_security_denial(
+            actor_id=current_user.id,
+            actor_role="PARENT",
+            target_resource="PARENT_CONTEXT",
+            resource_id=parent_id,
+            action="READ_WRITE",
+            reason="Unlinked parent profile access attempt",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access Denied: You are not authorized to access Parent '{parent_id}'."
+        )
 
+    # 3. Family / Guardian Care Network Relationship (Database-backed check)
     result = await db.execute(
         select(CareMember).where(
             CareMember.parent_id == parent_id,
@@ -94,30 +196,38 @@ async def verify_parent_authorization(
     )
     member = result.scalars().first()
 
-    # Demo care circle mapping for David Woodson (Son / Primary Guardian)
-    if not member and current_user.id == "usr-demo-1" and parent_id in ["p-1", "p-2"]:
-        member = CareMember(
-            parent_id=parent_id,
-            user_id=current_user.id,
-            name=current_user.full_name,
-            phone=current_user.phone,
-            relationship="Son" if parent_id == "p-1" else "Son-in-law",
-            role="PRIMARY_GUARDIAN",
-            status="ACTIVE",
-            permissions=["CHECK_INS", "MEDICATION", "APPOINTMENTS", "TRANSPORTATION", "ERRANDS", "CARE_HISTORY"],
-            is_primary_contact=True,
-        )
-
     if not member:
+        log_security_denial(
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            target_resource="CARE_CIRCLE",
+            resource_id=parent_id,
+            action="ACCESS",
+            reason="No active CareMember record found for user in target parent circle",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Access Denied: You are not authorized to access Parent '{parent_id}' Care Circle."
+            detail=f"Access Denied: You are not an active member of Parent '{parent_id}' Care Circle."
         )
 
+    # 4. Task-Scoped Permission Enforcement
     if required_permission:
         granted_permissions = member.permissions or []
-        is_authorized = required_permission.value in granted_permissions or "ALL" in granted_permissions or member.role in ["PRIMARY_GUARDIAN", "PARENT", "ADMIN"]
+        is_authorized = (
+            required_permission.value in granted_permissions
+            or "ALL" in granted_permissions
+            or member.relationship == "PRIMARY_GUARDIAN"
+            or member.role in ["PRIMARY_GUARDIAN", "ADMIN"]
+        )
         if not is_authorized:
+            log_security_denial(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                target_resource="CARE_PERMISSION",
+                resource_id=parent_id,
+                action=required_permission.value,
+                reason=f"Missing required permission '{required_permission.value}'",
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access Denied: Missing required permission '{required_permission.value}' for Parent '{parent_id}'."

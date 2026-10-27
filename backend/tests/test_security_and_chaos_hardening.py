@@ -9,6 +9,7 @@ from app.main import app
 from app.models.care_request import CareRequest
 from app.models.outbox import OutboxEvent, ProcessedEvent
 from app.models.decision import DecisionCard, AuditEvent
+from app.models.parent import ParentProfile
 from app.models.user import User
 from app.services.care_request_service import CareRequestService
 from app.services.decision_service import DecisionService
@@ -81,6 +82,8 @@ async def test_stale_decision_card_execution_rejected(async_db: AsyncSession):
     await async_db.commit()
 
     user = User(id="p-1", phone="+15551112222", full_name="Parent P1", role="PARENT", is_active=True)
+    async_db.add_all([user, ParentProfile(id="p-1", user_id="p-1", full_name="Parent P1")])
+    await async_db.commit()
 
     with pytest.raises(Exception) as exc_info:
         await DecisionService.resolve_decision(
